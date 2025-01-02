@@ -53,6 +53,8 @@ intents.guilds = True
 intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+start_time = time.time()
+
 # 一次性加載全部的文件
 def load_yaml(file_name, default=None):
     if default is None:
@@ -73,7 +75,9 @@ def save_yaml(file_name, data):
     with open(file_name, 'w', encoding='utf-8') as f:
         yaml.dump(data, f, allow_unicode=True)
 
-def load_json(file_name, default={}):
+def load_json(file_name, default=None):
+    if default is None:
+        default = {}
     """通用 JSON 文件加載函數"""
     try:
         with open(file_name, 'r', encoding='utf-8') as f:
@@ -86,17 +90,23 @@ def save_json(file_name, data):
     """通用 JSON 文件保存函數"""
     with open(file_name, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4)
-
+        
 user_balance = load_yaml('balance.yml')
-dm_messages = load_json('dm_messages.json')
-questions = load_yaml('trivia_questions.yml', {}).get('questions', [])
-fish_data = load_yaml('fishi.yml')
-shop_data = load_yaml('fishi_shop.yml')
-user_rod = load_yaml('user_rod.yml', {})
 config = load_json("config.json")
 user_data = load_yaml("config_user.yml")
 
-jobs_data = config.get("jobs", {})
+raw_jobs = config.get("jobs", [])
+jobs_data = {job: details for item in raw_jobs for job, details in item.items()}
+fish_data = config.get("fish", {})
+
+if not jobs_data:
+    print("警告: 職業數據 (jobs) 為空！請檢查 config.json 文件。")
+if not fish_data:
+    print("警告: 魚類數據 (fish) 為空！請檢查 config.json 文件。")
+
+dm_messages = load_json('dm_messages.json')
+questions = load_yaml('trivia_questions.yml', {}).get('questions', [])
+user_rod = load_yaml('user_rod.yml', {})
 
 if not os.path.exists('user_rod.yml'):
     save_yaml('user_rod.yml', {})
@@ -284,6 +294,15 @@ async def on_message(message):
             await message.channel.send(f"你趕快去睡覺 現在已經是 {current_time} 了 別再熬夜了！")
         else:
             await message.reply(f"現在的時間是 {current_time} 汝還不就寢嗎？", mention_author=False)
+
+    if '閉嘴蜘蛛俠' in message.content:
+        await message.channel.send(f'deadpool:This is Deadpool 2, not Titanic! Stop serenading me, Celine!')
+        await asyncio.sleep(3)
+        await message.channel.send(f'deadpool:You’re singing way too good, can you sing it like crap for me?!')
+        await asyncio.sleep(3)
+        await message.channel.send(f'Celine Dion:Shut up, Spider-Man!')
+        await asyncio.sleep(3)
+        await message.channel.send(f'deadpool:sh*t, I really should have gone with NSYNC!')
     
     await bot.process_commands(message)
 
@@ -303,6 +322,11 @@ async def on_ready():
         print("已設置機器人的狀態。")
     except Exception as e:
         print(f"Failed to set presence: {e}")
+
+    end_time = time.time()
+    startup_time = end_time - start_time
+    
+    print(f'Bot startup time: {startup_time:.2f} seconds')
 
     global last_activity_time
     last_activity_time = time.time()
@@ -468,34 +492,58 @@ async def balance_top(interaction: discord.Interaction):
         await interaction.followup.send("執行命令時發生未預期的錯誤，請稍後再試。", ephemeral=True)
         logging.error(f"執行命令時發生錯誤: {e}")
 
-@bot.slash_command(name="choose_job", description="選擇你的工作並保存至配置！")
+@bot.slash_command(name="choose_job", description="選擇你的工作！")
 async def choose_job(interaction: discord.Interaction):
     guild_id = str(interaction.guild.id)
     user_id = str(interaction.user.id)
 
     if guild_id in user_data and user_id in user_data[guild_id]:
-        current_job = user_data[guild_id][user_id]["job"]
-        embed = discord.Embed(
-            title="職業選擇",
-            description=f"你已經有職業了！你現在的是 **{current_job}**。",
-            color=discord.Color.blue()
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
+        current_job = user_data[guild_id][user_id].get("job")
+        if current_job:
+            embed = discord.Embed(
+                title="職業選擇",
+                description=f"你已經有職業了！你現在的是 **{current_job}**。",
+                color=discord.Color.blue()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
 
-    if not jobs_data:
+    if not jobs_data or not isinstance(jobs_data, dict):
         embed = discord.Embed(
             title="錯誤",
-            description="職業數據尚未配置，請使用**`/feedback`**指令回報錯誤！",
+            description="職業數據尚未正確配置，請使用 **`/feedback`** 指令回報錯誤！",
             color=discord.Color.red()
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
 
-    options = [
-        discord.SelectOption(label=job, description=f"獲取 {data['min']}-{data['max']} 幽靈幣", value=job)
-        for job, data in jobs_data.items()
-    ]
+    try:
+        options = [
+            discord.SelectOption(
+                label=job,
+                description=f"獲取 {data['min']}-{data['max']} 幽靈幣",
+                value=job
+            )
+            for job, data in jobs_data.items()
+            if isinstance(data, dict) and "min" in data and "max" in data
+        ]
+    except (KeyError, TypeError):
+        embed = discord.Embed(
+            title="錯誤",
+            description="職業數據配置不正確，請使用 **`/feedback`** 指令回報錯誤！",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    if not options:
+        embed = discord.Embed(
+            title="錯誤",
+            description="目前沒有可用的職業選項，請稍後再試！",
+            color=discord.Color.orange()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
 
     class JobSelect(discord.ui.Select):
         def __init__(self):
@@ -511,7 +559,10 @@ async def choose_job(interaction: discord.Interaction):
 
             if guild_id not in user_data:
                 user_data[guild_id] = {}
-            user_data[guild_id][user_id] = {"job": chosen_job, "cooldown": None}
+            if user_id not in user_data[guild_id]:
+                user_data[guild_id][user_id] = {}
+            user_data[guild_id][user_id]["job"] = chosen_job
+            user_data[guild_id][user_id]["work_cooldown"] = None
             save_yaml("config_user.yml", user_data)
 
             for child in self.view.children:
@@ -528,16 +579,18 @@ async def choose_job(interaction: discord.Interaction):
         def __init__(self):
             super().__init__(timeout=60)
             self.add_item(JobSelect())
+            self.message = None
 
         async def on_timeout(self):
-            for child in self.children:
-                child.disabled = True
-            embed = discord.Embed(
-                title="選擇超時",
-                description="選擇已超時，請重新使用指令！",
-                color=discord.Color.orange()
-            )
-            await self.message.edit(embed=embed, view=self)
+            if self.message:
+                for child in self.children:
+                    child.disabled = True
+                embed = discord.Embed(
+                    title="選擇超時",
+                    description="選擇已超時，請重新使用指令！",
+                    color=discord.Color.orange()
+                )
+                await self.message.edit(embed=embed, view=self)
 
     view = JobView()
     embed = discord.Embed(
@@ -545,78 +598,128 @@ async def choose_job(interaction: discord.Interaction):
         description="請從下方選擇你的工作：",
         color=discord.Color.blurple()
     )
-    message = await interaction.response.send_message(embed=embed, view=view)
-    view.message = await message
+    
+    await interaction.response.send_message(embed=embed, view=view)
+    view.message = await interaction.original_response()
+
+    if guild_id in user_data and user_id in user_data[guild_id]:
+        current_job = user_data[guild_id][user_id].get("job")
+        if current_job:
+            for child in view.children:
+                child.disabled = True
+            embed = discord.Embed(
+                title="職業已選擇",
+                description=f"你已經選擇了職業 **{current_job}**，選擇菜單已被禁用。",
+                color=discord.Color.green()
+            )
+            await view.message.edit(embed=embed, view=view)
+
+@bot.slash_command(name="reset_job", description="Reset your job")
+async def reset_job(ctx):
+    guild_id = str(ctx.guild.id)
+    user_id = str(ctx.author.id)
+
+    group_data = user_data.get(guild_id, {})
+    user_info = group_data.get(user_id, {})
+    current_job = user_info.get("job", "無職業")
+
+    embed = discord.Embed(
+        title="職業重置確認",
+        description=f"你當前的職業是：`{current_job}`\n\n確定要放棄現有職業嗎？",
+        color=discord.Color.orange()
+    )
+    embed.set_footer(text="請選擇 Yes 或 No")
+
+    class ConfirmReset(discord.ui.View):
+        def __init__(self):
+            super().__init__()
+
+        @discord.ui.button(label="Yes", style=discord.ButtonStyle.green)
+        async def confirm(self, button: discord.ui.Button, interaction: discord.Interaction):
+            if interaction.user != ctx.author:
+                await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
+                return
+
+            if guild_id in user_data and user_id in user_data[guild_id]:
+                user_data[guild_id][user_id]["job"] = None
+                save_yaml("config_user.yml", user_data)
+
+            success_embed = discord.Embed(
+                title="成功",
+                description="你的職業已被清除！",
+                color=discord.Color.green()
+            )
+            await interaction.response.edit_message(embed=success_embed, view=None)
+
+        @discord.ui.button(label="No", style=discord.ButtonStyle.red)
+        async def cancel(self, button: discord.ui.Button, interaction: discord.Interaction):
+            if interaction.user != ctx.author:
+                await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
+                return
+
+            cancel_embed = discord.Embed(
+                title="操作取消",
+                description="你的職業未被清除。",
+                color=discord.Color.red()
+            )
+            await interaction.response.edit_message(embed=cancel_embed, view=None)
+
+    await ctx.respond(embed=embed, view=ConfirmReset())
 
 @bot.slash_command(name="work", description="執行你的工作並賺取幽靈幣！")
 async def work(interaction: discord.Interaction):
-    try:
-        if not interaction.guild:
-            await interaction.response.send_message("此命令只能在伺服器中使用。", ephemeral=True)
-            return
+    guild_id = str(interaction.guild.id)
+    user_id = str(interaction.user.id)
 
-        guild_id = str(interaction.guild.id)
-        user_id = str(interaction.user.id)
-
-        if guild_id not in user_data or user_id not in user_data[guild_id]:
-            await interaction.response.send_message(
-                "你尚未選擇職業，請先使用 `/choose_job` 選擇你的職業！", ephemeral=True
-            )
-            return
-
-        user_info = user_data[guild_id][user_id]
-        job_name = user_info.get("job")
-        last_cooldown = user_info.get("cooldown")
-
-        if job_name not in jobs_data:
-            await interaction.response.send_message(
-                f"無效的職業: {job_name}，請重新選擇！", ephemeral=True
-            )
-            return
-
-        now = datetime.now()
-        if last_cooldown and datetime.fromisoformat(last_cooldown) > now:
-            remaining = datetime.fromisoformat(last_cooldown) - now
-            minutes, seconds = divmod(remaining.total_seconds(), 60)
-
-            embed = discord.Embed(
-                title="冷卻中",
-                description=f"你正在冷卻中，還需等待 {int(minutes)} 分鐘 {int(seconds)} 秒！",
-                color=discord.Color.red()
-            )
-            embed.set_footer(text=f"職業: {job_name}")
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-
-        job_rewards = jobs_data[job_name]
-        reward = random.randint(job_rewards["min"], job_rewards["max"])
-
-        if guild_id not in user_balance:
-            user_balance[guild_id] = {}
-        user_balance[guild_id][user_id] = user_balance[guild_id].get(user_id, 0) + reward
-        save_yaml("balance.yml", user_balance)
-
-        new_cooldown = now + timedelta(seconds=WORK_COOLDOWN_SECONDS)
-        user_data[guild_id][user_id]["cooldown"] = new_cooldown.isoformat()
-        save_yaml("config_user.yml", user_data)
-
-        embed = discord.Embed(
-            title="工作成功！",
-            description=f"{interaction.user.mention} 作為 **{job_name}** 賺取了 **{reward} 幽靈幣**！🎉",
-            color=discord.Color.green()
+    user_info = user_data.get(guild_id, {}).get(user_id)
+    if not user_info or not user_info.get("job"):
+        await interaction.response.send_message(
+            "你尚未選擇職業，請先使用 `/choose_job` 選擇你的職業！", ephemeral=True
         )
-        embed.set_footer(text=f"職業: {job_name}")
+        return
 
-        await interaction.response.send_message(embed=embed)
+    job_name = user_info.get("job")
 
-    except Exception as e:
-        logging.error(f"執行 work 指令時出錯: {e}")
+    if isinstance(jobs_data, list):
+        jobs_dict = {job["name"]: job for job in jobs_data if "name" in job}
+    else:
+        jobs_dict = jobs_data
+
+    job_rewards = jobs_dict.get(job_name)
+    if not job_rewards:
+        await interaction.response.send_message(
+            f"無效的職業: {job_name}，請重新選擇！", ephemeral=True
+        )
+        return
+
+    last_cooldown = user_info.get("work_cooldown")
+    now = datetime.now()
+    if last_cooldown and datetime.fromisoformat(last_cooldown) > now:
+        remaining = datetime.fromisoformat(last_cooldown) - now
+        minutes, seconds = divmod(remaining.total_seconds(), 60)
         embed = discord.Embed(
-            title="錯誤",
-            description="執行命令時發生錯誤，請稍後再試。",
+            title="冷卻中",
+            description=f"你正在冷卻中，還需等待 {int(minutes)} 分鐘 {int(seconds)} 秒！",
             color=discord.Color.red()
         )
+        embed.set_footer(text=f"職業: {job_name}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    reward = random.randint(job_rewards["min"], job_rewards["max"])
+    user_balance.setdefault(guild_id, {})[user_id] = user_balance[guild_id].get(user_id, 0) + reward
+    user_info["work_cooldown"] = (now + timedelta(seconds=WORK_COOLDOWN_SECONDS)).isoformat()
+
+    save_yaml("balance.yml", user_balance)
+    save_yaml("config_user.yml", user_data)
+    
+    embed = discord.Embed(
+        title="工作成功！",
+        description=f"{interaction.user.mention} 作為 **{job_name}** 賺取了 **{reward} 幽靈幣**！🎉",
+        color=discord.Color.green()
+    )
+    embed.set_footer(text=f"職業: {job_name}")
+    await interaction.response.send_message(embed=embed)
 
 @bot.slash_command(name="pay", description="转账给其他用户")
 async def pay(interaction: discord.Interaction, member: discord.Member, amount: int):
