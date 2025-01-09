@@ -23,20 +23,16 @@ from filelock import FileLock
 from omikuji import draw_lots
 from responses import food_responses, death_responses, life_death_responses, self_responses, friend_responses, maid_responses, mistress_responses, reimu_responses, get_random_response
 
-# 加載變量環境
 load_dotenv()
 
-# 硬編碼的token和discord_user_id
 TOKEN = os.getenv('DISCORD_TOKEN_MAIN_BOT')
 AUTHOR_ID = int(os.getenv('AUTHOR_ID', 0))
 LOG_FILE_PATH = "feedback_log.txt"
-WORK_COOLDOWN_SECONDS = 3600
+WORK_COOLDOWN_SECONDS = 600
 
-# 如果token和discord_user_id缺失是會顯示 “缺少必要的環境變量 DISCORD_TOKEN_MAIN_BOT 或 AUTHOR_ID”
 if not TOKEN or not AUTHOR_ID:
     raise ValueError("缺少必要的環境變量 DISCORD_TOKEN_MAIN_BOT 或 AUTHOR_ID")
 
-# 基礎的log記錄器
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -46,7 +42,6 @@ logging.basicConfig(
     ]
 )
 
-# 初始化intents和bot
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -55,7 +50,6 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 
 start_time = time.time()
 
-# 一次性加載全部的文件
 def load_yaml(file_name, default=None):
     if default is None:
         default = {}
@@ -98,11 +92,14 @@ user_data = load_yaml("config_user.yml")
 raw_jobs = config.get("jobs", [])
 jobs_data = {job: details for item in raw_jobs for job, details in item.items()}
 fish_data = config.get("fish", {})
+shop_data = config.get("shop_item", {})
 
 if not jobs_data:
     print("警告: 職業數據 (jobs) 為空！請檢查 config.json 文件。")
 if not fish_data:
     print("警告: 魚類數據 (fish) 為空！請檢查 config.json 文件。")
+if not shop_data:
+    print("警告: 商店數據 (shop_item) 為空！請檢查 config.json 文件。")
 
 dm_messages = load_json('dm_messages.json')
 questions = load_yaml('trivia_questions.yml', {}).get('questions', [])
@@ -117,7 +114,6 @@ def get_random_question():
 cooldowns = {}
 active_giveaways = {}
 
-# 偵測訊息事件裝飾器
 @bot.event
 async def on_message(message):
     global last_activity_time
@@ -294,7 +290,7 @@ async def on_message(message):
             await message.channel.send(f"你趕快去睡覺 現在已經是 {current_time} 了 別再熬夜了！")
         else:
             await message.reply(f"現在的時間是 {current_time} 汝還不就寢嗎？", mention_author=False)
-
+    
     if '閉嘴蜘蛛俠' in message.content:
         await message.channel.send(f'deadpool:This is Deadpool 2, not Titanic! Stop serenading me, Celine!')
         await asyncio.sleep(3)
@@ -303,10 +299,27 @@ async def on_message(message):
         await message.channel.send(f'Celine Dion:Shut up, Spider-Man!')
         await asyncio.sleep(3)
         await message.channel.send(f'deadpool:sh*t, I really should have gone with NSYNC!')
+        
+    if '普奇神父' in message.content:
+        await message.channel.send(f"你相信引力嗎？")
+        await asyncio.sleep(3)
+        await message.channel.send(f"我很敬佩第一個吃蘑菇的人，説不定是毒蘑菇呢")
+        await asyncio.sleep(5)
+        await message.channel.send(f"DIO")
+        await asyncio.sleep(2)
+        await message.channel.send(f"等我得心應手后，我一定會讓你覺醒的")
+        await asyncio.sleep(5)
+        await message.channel.send(f"人...終是要上天堂的.")
+        await asyncio.sleep(3)
+        await message.channel.send(f"最後再説一遍 時間要開始加速了，下來吧")
+        await asyncio.sleep(1)
+        await message.channel.send(f"螺旋阶梯、独角仙、废墟街道、无花果塔、德蕾莎之道、特异点、乔托、天使、绣球花、秘密皇帝。")
+        await asyncio.sleep(2)
+        await message.channel.send(f"話已至此，")
+        await message.channel.send(f"# Made in Heaven!!")
     
     await bot.process_commands(message)
 
-# 機器人上綫事件
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
@@ -317,12 +330,12 @@ async def on_ready():
     try:
         await bot.change_presence(
             status=discord.Status.dnd,
-            activity=discord.Activity(type=discord.ActivityType.playing, name='Code')
+            activity=discord.Activity(type=discord.ActivityType.playing, name='魔物獵人Monster Hunter')
         )
         print("已設置機器人的狀態。")
     except Exception as e:
         print(f"Failed to set presence: {e}")
-
+    
     end_time = time.time()
     startup_time = end_time - start_time
     
@@ -376,7 +389,7 @@ async def about_me(ctx: discord.ApplicationContext):
         )
         return
 
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # 當前時間
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     embed = discord.Embed(
         title="關於我",
@@ -491,11 +504,131 @@ async def balance_top(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send("執行命令時發生未預期的錯誤，請稍後再試。", ephemeral=True)
         logging.error(f"執行命令時發生錯誤: {e}")
+        
+@bot.slash_command(name="shop", description="查看商店中的商品列表")
+async def shop(ctx: discord.ApplicationContext):
+    guild_id = str(ctx.guild.id)
+    user_id = str(ctx.author.id)
+
+    if not shop_data:
+        await ctx.respond("商店數據加載失敗，請使用**`/feedback`**指令回報問題！", ephemeral=True)
+        return
+
+    options = [
+        discord.SelectOption(
+            label=item["name"],
+            description=f"價格: {item['price']} + 稅: {item['tax']}, MP: {item['MP']}",
+            value=item["name"]
+        )
+        for item in shop_data
+    ]
+
+    select_menu = Select(
+        placeholder="選擇一件商品",
+        options=options,
+        min_values=1,
+        max_values=1
+    )
+
+    async def select_callback(interaction: discord.Interaction):
+        if interaction.user.id != ctx.author.id:
+            await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
+            return
+
+        selected_item_name = select_menu.values[0]
+        selected_item = next(
+            (item for item in shop_data if item["name"] == selected_item_name), None
+        )
+
+        if selected_item:
+            total_price = selected_item["price"] + selected_item["tax"]
+
+            embed = discord.Embed(
+                title="購買確認",
+                description=(f"您選擇了 {selected_item_name}。\n"
+                             f"價格: {selected_item['price']} 幽靈幣\n"
+                             f"稅金: {selected_item['tax']} 幽靈幣\n"
+                             f"心理壓力 (MP): {selected_item['MP']}\n"
+                             f"總價格: {total_price} 幽靈幣"),
+                color=discord.Color.green()
+            )
+
+            confirm_button = Button(label="確認購買", style=discord.ButtonStyle.success)
+            cancel_button = Button(label="取消", style=discord.ButtonStyle.danger)
+
+            async def confirm_callback(interaction: discord.Interaction):
+                if interaction.user.id != ctx.author.id:
+                    await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
+                    return
+
+                user_balance.setdefault(guild_id, {})
+                user_balance[guild_id].setdefault(user_id, 0)
+
+                current_balance = user_balance[guild_id][user_id]
+
+                if current_balance >= total_price:
+                    user_balance[guild_id][user_id] -= total_price
+                    save_yaml('balance.yml', user_balance)
+
+                    user_data.setdefault(guild_id, {})
+                    user_data[guild_id].setdefault(user_id, {"MP": 100})
+
+                    user_data[guild_id][user_id]["MP"] = max(
+                        0, user_data[guild_id][user_id]["MP"] - selected_item["MP"]
+                    )
+                    save_yaml('config_user.yml', user_data)
+
+                    effect_message = (
+                        f"您使用了 {selected_item_name}，心理压力（MP）减少了 {selected_item['MP']} 点！\n"
+                        f"当前心理压力（MP）：{user_data[guild_id][user_id]['MP']} 点。"
+                    )
+
+                    await interaction.response.edit_message(
+                        content=f"購買成功！已扣除 {total_price} 幽靈幣。\n{effect_message}",
+                        embed=None,
+                        view=None
+                    )
+                else:
+                    await interaction.response.edit_message(
+                        content="餘額不足，無法完成購買！", embed=None, view=None
+                    )
+
+            async def cancel_callback(interaction: discord.Interaction):
+                if interaction.user.id != ctx.author.id:
+                    await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
+                    return
+
+                await interaction.response.edit_message(
+                    content="購買已取消！", embed=None, view=None
+                )
+
+            confirm_button.callback = confirm_callback
+            cancel_button.callback = cancel_callback
+
+            view = View()
+            view.add_item(confirm_button)
+            view.add_item(cancel_button)
+
+            await interaction.response.edit_message(embed=embed, view=view)
+
+    select_menu.callback = select_callback
+
+    embed = discord.Embed(
+        title="商店",
+        description="選擇想購買的商品：",
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text="感謝您的光臨！")
+
+    view = View()
+    view.add_item(select_menu)
+
+    await ctx.respond(embed=embed, view=view, ephemeral=False)
 
 @bot.slash_command(name="choose_job", description="選擇你的工作！")
-async def choose_job(interaction: discord.Interaction):
-    guild_id = str(interaction.guild.id)
-    user_id = str(interaction.user.id)
+async def choose_job(ctx: discord.ApplicationContext):
+    guild_id = str(ctx.guild.id)
+    user_id = str(ctx.user.id)
 
     if guild_id in user_data and user_id in user_data[guild_id]:
         current_job = user_data[guild_id][user_id].get("job")
@@ -505,7 +638,7 @@ async def choose_job(interaction: discord.Interaction):
                 description=f"你已經有職業了！你現在的是 **{current_job}**。",
                 color=discord.Color.blue()
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await ctx.respond(embed=embed, ephemeral=True)
             return
 
     if not jobs_data or not isinstance(jobs_data, dict):
@@ -514,39 +647,34 @@ async def choose_job(interaction: discord.Interaction):
             description="職業數據尚未正確配置，請使用 **`/feedback`** 指令回報錯誤！",
             color=discord.Color.red()
         )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-
-    try:
-        options = [
-            discord.SelectOption(
-                label=job,
-                description=f"獲取 {data['min']}-{data['max']} 幽靈幣",
-                value=job
-            )
-            for job, data in jobs_data.items()
-            if isinstance(data, dict) and "min" in data and "max" in data
-        ]
-    except (KeyError, TypeError):
-        embed = discord.Embed(
-            title="錯誤",
-            description="職業數據配置不正確，請使用 **`/feedback`** 指令回報錯誤！",
-            color=discord.Color.red()
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-
-    if not options:
-        embed = discord.Embed(
-            title="錯誤",
-            description="目前沒有可用的職業選項，請稍後再試！",
-            color=discord.Color.orange()
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await ctx.respond(embed=embed, ephemeral=True)
         return
 
     class JobSelect(discord.ui.Select):
         def __init__(self):
+            # 計算當前群組內選擇 "IT程序員" 的人數
+            it_count = sum(
+                1 for u_id, u_info in user_data.get(guild_id, {}).items()
+                if u_info.get("job") == "IT程序員"
+            )
+
+            options = []
+            for job, data in jobs_data.items():
+                if isinstance(data, dict) and "min" in data and "max" in data:
+                    if job == "IT程序員" and it_count >= 2:  # 針對 IT程序員 檢查當前群組是否已滿
+                        options.append(discord.SelectOption(
+                            label=f"   {job}   ",
+                            description=f"{data['min']}-{data['max']}幽靈幣 (已滿員)",
+                            value=f"{job}_disabled",
+                            emoji="❌"
+                        ))
+                    else:
+                        options.append(discord.SelectOption(
+                            label=f"   {job}   ",
+                            description=f"{data['min']}-{data['max']}幽靈幣",
+                            value=job
+                        ))
+
             super().__init__(
                 placeholder="選擇你的工作...",
                 options=options,
@@ -555,12 +683,21 @@ async def choose_job(interaction: discord.Interaction):
             )
 
         async def callback(self, interaction: discord.Interaction):
+            if interaction.user.id != ctx.user.id:
+                await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
+                return
+
             chosen_job = self.values[0]
+
+            if "_disabled" in chosen_job:
+                await interaction.response.send_message("該職業已滿員，請選擇其他職業！", ephemeral=True)
+                return
 
             if guild_id not in user_data:
                 user_data[guild_id] = {}
             if user_id not in user_data[guild_id]:
                 user_data[guild_id][user_id] = {}
+
             user_data[guild_id][user_id]["job"] = chosen_job
             user_data[guild_id][user_id]["work_cooldown"] = None
             save_yaml("config_user.yml", user_data)
@@ -579,18 +716,16 @@ async def choose_job(interaction: discord.Interaction):
         def __init__(self):
             super().__init__(timeout=60)
             self.add_item(JobSelect())
-            self.message = None
 
         async def on_timeout(self):
-            if self.message:
-                for child in self.children:
-                    child.disabled = True
-                embed = discord.Embed(
-                    title="選擇超時",
-                    description="選擇已超時，請重新使用指令！",
-                    color=discord.Color.orange()
-                )
-                await self.message.edit(embed=embed, view=self)
+            for child in self.children:
+                child.disabled = True
+            embed = discord.Embed(
+                title="選擇超時",
+                description="選擇已超時，請重新使用指令！",
+                color=discord.Color.orange()
+            )
+            await self.message.edit(embed=embed, view=self)
 
     view = JobView()
     embed = discord.Embed(
@@ -598,23 +733,10 @@ async def choose_job(interaction: discord.Interaction):
         description="請從下方選擇你的工作：",
         color=discord.Color.blurple()
     )
-    
-    await interaction.response.send_message(embed=embed, view=view)
-    view.message = await interaction.original_response()
+    message = await ctx.respond(embed=embed, view=view)
+    view.message = await message.original_message()
 
-    if guild_id in user_data and user_id in user_data[guild_id]:
-        current_job = user_data[guild_id][user_id].get("job")
-        if current_job:
-            for child in view.children:
-                child.disabled = True
-            embed = discord.Embed(
-                title="職業已選擇",
-                description=f"你已經選擇了職業 **{current_job}**，選擇菜單已被禁用。",
-                color=discord.Color.green()
-            )
-            await view.message.edit(embed=embed, view=view)
-
-@bot.slash_command(name="reset_job", description="Reset your job")
+@bot.slash_command(name="reset_job", description="重置職業")
 async def reset_job(ctx):
     guild_id = str(ctx.guild.id)
     user_id = str(ctx.author.id)
@@ -671,8 +793,8 @@ async def work(interaction: discord.Interaction):
     guild_id = str(interaction.guild.id)
     user_id = str(interaction.user.id)
 
-    user_info = user_data.get(guild_id, {}).get(user_id)
-    if not user_info or not user_info.get("job"):
+    user_info = user_data.setdefault(guild_id, {}).setdefault(user_id, {})
+    if not user_info.get("job"):
         await interaction.response.send_message(
             "你尚未選擇職業，請先使用 `/choose_job` 選擇你的職業！", ephemeral=True
         )
@@ -689,6 +811,13 @@ async def work(interaction: discord.Interaction):
     if not job_rewards:
         await interaction.response.send_message(
             f"無效的職業: {job_name}，請重新選擇！", ephemeral=True
+        )
+        return
+
+    user_info.setdefault("MP", 0)
+    if user_info["MP"] >= 100:
+        await interaction.response.send_message(
+            "你的心理壓力已達到最大值！請休息一下再繼續工作。", ephemeral=True
         )
         return
 
@@ -710,12 +839,16 @@ async def work(interaction: discord.Interaction):
     user_balance.setdefault(guild_id, {})[user_id] = user_balance[guild_id].get(user_id, 0) + reward
     user_info["work_cooldown"] = (now + timedelta(seconds=WORK_COOLDOWN_SECONDS)).isoformat()
 
+    user_info["MP"] += 10
     save_yaml("balance.yml", user_balance)
     save_yaml("config_user.yml", user_data)
-    
+
     embed = discord.Embed(
         title="工作成功！",
-        description=f"{interaction.user.mention} 作為 **{job_name}** 賺取了 **{reward} 幽靈幣**！🎉",
+        description=(
+            f"{interaction.user.mention} 作為 **{job_name}** 賺取了 **{reward} 幽靈幣**！🎉\n"
+            f"當前心理壓力（MP）：{user_info['MP']}/100"
+        ),
         color=discord.Color.green()
     )
     embed.set_footer(text=f"職業: {job_name}")
@@ -762,7 +895,7 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
             ),
             color=discord.Color.green()
         )
-        embed.set_footer(text="如有疑问，请联系管理员")
+        embed.set_footer(text="如有問題 請在Github issues提交疑問")
 
         await interaction.response.send_message(embed=embed, ephemeral=False)
         logging.info(f"转账成功: {interaction.user.id} -> {member.id} 金额: {amount}")
@@ -788,7 +921,7 @@ async def addmoney(interaction: discord.Interaction, member: discord.Member, amo
         await interaction.response.send_message("❌ 不能给机器人增加幽靈幣。", ephemeral=True)
         return
 
-    if amount > 100000:
+    if amount > 10000000:
         await interaction.response.send_message("❌ 单次添加金额不能超过 **100,000 幽靈幣**。", ephemeral=True)
         return
 
@@ -1233,7 +1366,17 @@ async def server_info(interaction: Interaction):
 @bot.slash_command(name="user_info", description="获取用户的基本信息")
 async def userinfo(ctx: discord.ApplicationContext, user: discord.Member = None):
     user = user or ctx.author
-
+    
+    guild_id = str(ctx.guild.id) if ctx.guild else "DM"
+    user_id = str(user.id)
+    
+    guild_config = user_data.get(guild_id, {})
+    user_config = guild_config.get(user_id, {})
+    
+    work_cooldown = user_config.get('work_cooldown', '未工作')
+    job = user_config.get('job', '無職業')
+    mp = user_config.get('MP', 0)
+    
     embed = discord.Embed(title="用户信息", color=discord.Color.from_rgb(255, 182, 193))
     embed.set_thumbnail(url=user.display_avatar.url)
 
@@ -1253,7 +1396,17 @@ async def userinfo(ctx: discord.ApplicationContext, user: discord.Member = None)
     embed.add_field(name="最高角色", value=user.top_role.mention if user.top_role else "无", inline=True)
     embed.add_field(name="Bot?", value="是" if getattr(user, "bot", False) else "否", inline=True)
 
-    await ctx.respond(embed=embed)
+    work_embed = discord.Embed(
+        title="工作資訊",
+        color=discord.Color.from_rgb(135, 206, 250)
+    )
+    work_embed.add_field(
+        name="狀態",
+        value=f"💼 職業: {job}\n⏳ 冷卻時間: {work_cooldown}\n📊 壓力指數 (MP): {mp}/100",
+        inline=False
+    )
+    
+    await ctx.respond(embeds=[embed, work_embed])
 
 class FeedbackButtons(View):
     def __init__(self, description: str = None):
@@ -1344,10 +1497,8 @@ async def trivia(interaction: discord.Interaction):
 @bot.slash_command(name="timeout", description="禁言指定的使用者（以分鐘為單位）")
 async def timeout(interaction: discord.Interaction, member: discord.Member, duration: int):
     if interaction.user.guild_permissions.moderate_members:
-        # 延迟响应，避免超时
         await interaction.response.defer(ephemeral=True)
 
-        # 检查机器人权限
         bot_member = interaction.guild.me
         if not bot_member.guild_permissions.moderate_members:
             embed = discord.Embed(
@@ -1358,7 +1509,6 @@ async def timeout(interaction: discord.Interaction, member: discord.Member, dura
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
-        # 检查目标用户权限
         if member.top_role >= bot_member.top_role:
             embed = discord.Embed(
                 title="❌ 操作失敗",
@@ -1369,11 +1519,9 @@ async def timeout(interaction: discord.Interaction, member: discord.Member, dura
             return
 
         try:
-            # 計算禁言結束時間
             mute_time = datetime.utcnow() + timedelta(minutes=duration)
             await member.timeout(mute_time, reason=f"Timeout by {interaction.user} for {duration} minutes")
             
-            # 成功禁言的回應
             embed = discord.Embed(
                 title="⛔ 成員禁言",
                 description=f"{member.mention} 已被禁言 **{duration} 分鐘**。",
@@ -1388,11 +1536,10 @@ async def timeout(interaction: discord.Interaction, member: discord.Member, dura
                 color=discord.Color.red()
             )
             try:
-                await interaction.followup.send(embed=embed, ephemeral=True)
+                await interaction.followup.send(embed=embed, ephemeral=False)
             except discord.Forbidden:
                 print("無法回應權限不足的錯誤訊息，請檢查機器人權限。")
         except discord.HTTPException as e:
-            # 其他 API 錯誤
             embed = discord.Embed(
                 title="❌ 禁言失敗",
                 description=f"操作失敗：{e}",
@@ -1400,7 +1547,6 @@ async def timeout(interaction: discord.Interaction, member: discord.Member, dura
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
     else:
-        # 使用者權限不足
         embed = discord.Embed(
             title="⚠️ 權限不足",
             description="你沒有權限使用這個指令。",
@@ -1412,7 +1558,7 @@ async def timeout(interaction: discord.Interaction, member: discord.Member, dura
 async def untimeout(interaction: discord.Interaction, member: discord.Member):
     if interaction.user.guild_permissions.moderate_members:
         try:
-            await member.timeout(None)  # 解除禁言
+            await member.timeout(None)
             embed = discord.Embed(
                 title="🔓 成員解除禁言",
                 description=f"{member.mention} 的禁言狀態已被解除。",
@@ -1426,7 +1572,7 @@ async def untimeout(interaction: discord.Interaction, member: discord.Member):
                 description=f"權限不足，無法解除 {member.mention} 的禁言。",
                 color=discord.Color.red()
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.response.send_message(embed=embed, ephemeral=False)
         except discord.HTTPException as e:
             embed = discord.Embed(
                 title="❌ 解除禁言失敗",
@@ -2127,42 +2273,41 @@ async def fish_back(interaction: discord.Interaction):
                 f"{interaction.user.mention} ❌ 查詢失敗，請重新嘗試 `/fish_back`！"
             )
 
-def is_on_cooldown(user_id, cooldown_file, cooldown_hours):
-    try:
-        with open(cooldown_file, "r") as f:
-            cooldowns = json.load(f)
-    except FileNotFoundError:
-        cooldowns = {}
-    
-    if str(user_id) in cooldowns:
-        last_used = datetime.fromisoformat(cooldowns[str(user_id)])
+def is_on_cooldown(user_id, cooldown_hours):
+    user_data = load_yaml("config_user.yml")
+    guild_id = str(user_id.guild.id)
+    user_id = str(user_id.id)
+
+    if guild_id in user_data and user_id in user_data[guild_id]:
+        last_used = datetime.fromisoformat(user_data[guild_id][user_id].get("draw_cooldown", "1970-01-01T00:00:00"))
         now = datetime.now()
         cooldown_period = timedelta(hours=cooldown_hours)
         if now < last_used + cooldown_period:
             remaining = last_used + cooldown_period - now
             remaining_time = f"{remaining.seconds // 3600}小時 {remaining.seconds % 3600 // 60}分鐘"
             return True, remaining_time
-    
+
     return False, None
 
-def update_cooldown(user_id, cooldown_file):
-    try:
-        with open(cooldown_file, "r") as f:
-            cooldowns = json.load(f)
-    except FileNotFoundError:
-        cooldowns = {}
-    
-    cooldowns[str(user_id)] = datetime.now().isoformat()
-    with open(cooldown_file, "w") as f:
-        json.dump(cooldowns, f)
+def update_cooldown(user_id):
+    user_data = load_yaml("config_user.yml")
+    guild_id = str(user_id.guild.id)
+    user_id = str(user_id.id)
+
+    if guild_id not in user_data:
+        user_data[guild_id] = {}
+    if user_id not in user_data[guild_id]:
+        user_data[guild_id][user_id] = {}
+
+    user_data[guild_id][user_id]["draw_cooldown"] = datetime.now().isoformat()
+    save_yaml("config_user.yml", user_data)
 
 @bot.slash_command(name="draw_lots", description="抽取御神抽籤")
 async def draw_lots_command(interaction: discord.Interaction):
-    cooldown_file = "cooldowns.json"
     cooldown_hours = 5
-    user_id = interaction.user.id
+    user_id = interaction.user
     
-    on_cooldown, remaining_time = is_on_cooldown(user_id, cooldown_file, cooldown_hours)
+    on_cooldown, remaining_time = is_on_cooldown(user_id, cooldown_hours)
     
     if on_cooldown:
         await interaction.response.send_message(f"你還在冷卻中，剩餘時間：{remaining_time}", ephemeral=True)
@@ -2177,19 +2322,20 @@ async def draw_lots_command(interaction: discord.Interaction):
         )
         
         await interaction.followup.send(embed=embed)
-        update_cooldown(user_id, cooldown_file)
+        update_cooldown(user_id)
 
-# 斜綫help指令
 @bot.slash_command(name="help", description="显示所有可用指令")
 async def help(ctx: discord.ApplicationContext):
     embed_test = discord.Embed(
         title="⚠️ 測試員指令",
-        description="> `shutdown` - 關閉機器人\n> `restart` - 重啓機器人",
+        description="> `shutdown` - 關閉機器人\n> `restart` - 重啓機器人\n`addmoney` - 添加用戶幽靈幣\n`remove` - 移除用戶的幽靈幣",
         color=discord.Color.orange()
     )
     embed_economy = discord.Embed(
         title="💸 經濟系統",
-        description="> `balance` - 用戶餘額\n> `work` - 工作\n> `pay` - 轉賬",
+        description=(
+        "> `balance` - 用戶餘額\n> `choose_job` - 選擇職業\n> `work` - 工作\n> `pay` - 轉賬\n"
+        "> `reset_job` - 重置你的職業\n`balance_top - 查看經濟排行榜`"),
         color=discord.Color.from_rgb(255, 182, 193)
     )
     embed_admin = discord.Embed(
@@ -2249,7 +2395,6 @@ async def help(ctx: discord.ApplicationContext):
     )
     select.callback = select_callback
 
-    # 超時處理 View
     class TimeoutView(View):
         def __init__(self, timeout=60):
             super().__init__(timeout=timeout)
@@ -2278,9 +2423,6 @@ async def help(ctx: discord.ApplicationContext):
     )
     view.message = await message.original_response()
 
-# 這裏是discord硬編碼部分的token如果沒有正確讀取到token的話會在終端機顯示
-# 終端機的部分會直接顯示 “機器人啟動時發生錯誤: {e}” “{e}”代表著什麽地方的錯誤
-# 如果token沒有正確讀取到的話會在終端機顯示 “無效的機器人令牌。請檢查 TOKEN。”
 try:
     bot.run(TOKEN, reconnect=True)
 except discord.LoginFailure:
