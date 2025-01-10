@@ -8,7 +8,7 @@ maybe i have time when have be adding english but i heve not time to adding
 
 My all time going to form real life work
 
-and not time can fix bot bug and issues
+issues to more and i not a time can fix bot bug and issues
 
 ## bot prefix
 the bot use commands prefix is **`/`**
