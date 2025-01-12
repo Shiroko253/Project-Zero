@@ -49,3 +49,7 @@ fix to much bug and issues and
 thx god me give all time fix that all issues and bug btw
 
 **I'm a steve**
+## about to more update and function
+doc/Future Expected Goals.md
+
+here you can looking it
