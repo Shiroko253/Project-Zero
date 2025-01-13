@@ -10,6 +10,12 @@ My all time going to form real life work
 
 issues to more and i not a time can fix bot bug and issues
 
+**I'm a steve**
+## about to more update and function
+[click me](https://github.com/Shiroko253/Project-Zero/blob/main/doc/Future%20Expected%20Goals.md)
+
+here you can looking it
+
 ## bot prefix
 the bot use commands prefix is **`/`**
 
@@ -47,9 +53,3 @@ this bot craete time is 4 year's ago
 fix to much bug and issues and 
 
 thx god me give all time fix that all issues and bug btw
-
-**I'm a steve**
-## about to more update and function
-[click me](https://github.com/Shiroko253/Project-Zero/blob/main/doc/Future%20Expected%20Goals.md)
-
-here you can looking it
