@@ -24,7 +24,7 @@ that is there we go
 - **Status**: Deprecated
 
 ### 2. Math Operation Expansion
-- **Description / 描述**: Enhance the calculator functionality with more operations and debugging.
+- **Description**: Enhance the calculator functionality with more operations and debugging.
 - **Features:
   - Basic and advanced operations (e.g., trigonometry, calculus).
   - Improved error handling and input validation.
