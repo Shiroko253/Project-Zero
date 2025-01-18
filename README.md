@@ -10,6 +10,15 @@ My all time going to form real life work
 
 issues to more and i not a time can fix bot bug and issues
 
+## craete this bot time
+this bot craete time is 4 year's ago
+
+4 year's now ahh that is long time
+
+fix to much bug and issues and 
+
+thx god me give all time fix that all issues and bug btw
+
 **I'm a steve**
 ## about to more update and function
 [click me](https://github.com/Shiroko253/Project-Zero/blob/main/doc/Future%20Expected%20Goals.md)
@@ -45,11 +54,3 @@ the bot use commands prefix is **`/`**
   - start_giveaway - giveaway time ~~let's go gameBLING!!!~~
   - timeout - shut up that guy
   - untimeout - give that guy telking
-## craete this bot time
-this bot craete time is 4 year's ago
-
-4 year's now ahh that is long time
-
-fix to much bug and issues and 
-
-thx god me give all time fix that all issues and bug btw
