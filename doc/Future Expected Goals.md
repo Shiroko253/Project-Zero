@@ -45,7 +45,7 @@ that is there we go
 - **Status**: Deprecated
 
 ### 5. Economy System Leaderboard and Stats Display
-- **Description / 描述**: Introduce a leaderboard for economy-based interactions and stats display.
+- **Description**: Introduce a leaderboard for economy-based interactions and stats display.
 - **Features**:
   - Display top earners and transaction history.
   - Detailed user statistics (work, balance, etc.).
