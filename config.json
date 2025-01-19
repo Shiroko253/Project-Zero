@@ -1,394 +1,394 @@
 {
     "jobs": [{
-      "農夫": { "min": 200, "max": 400 },
-      "鍛造師": { "min": 300, "max": 1000 },
-      "厨師": { "min": 100, "max": 300 },
-      "地圖師": { "min": 320, "max": 1200 },
-      "釀造師": { "min": 230, "max": 2300 },
-      "獵人":{ "min": 200, "max": 500 },
-      "伐木工":{ "min": 230, "max":2300 },
-      "礦工":{ "min": 400, "max":1000},
-      "消防員":{"min": 2300, "max":32000},
-      "IT程序員":{"min": 200, "max":45000}
+      "農夫": { "min": 220, "max": 430 },
+      "鍛造師": { "min": 330, "max": 1400 },
+      "厨師": { "min": 120, "max": 600 },
+      "地圖師": { "min": 360, "max": 3400 },
+      "釀造師": { "min": 250, "max": 7300 },
+      "獵人":{ "min": 450, "max": 1000 },
+      "伐木工":{ "min": 240, "max":2600 },
+      "礦工":{ "min": 2400, "max":25000},
+      "消防員":{"min": 4100, "max":450000},
+      "IT程序員":{"min": 4700, "max":6900000}
     }],
     "fish": [
         {
           "name": "金魚",
           "rarity": "common",
-          "min_size": 0.1,
-          "max_size": 0.3
+          "min_size": "0.1",
+          "max_size": "0.3"
         },
         {
           "name": "鯉魚",
           "rarity": "common",
-          "min_size": 0.5,
-          "max_size": 1.2
+          "min_size": "0.5",
+          "max_size": "1.2"
         },
         {
           "name": "黑鱸魚",
           "rarity": "uncommon",
-          "min_size": 1.0,
-          "max_size": 2.5
+          "min_size": "1.0",
+          "max_size": "2.5"
         },
         {
           "name": "河豚",
           "rarity": "uncommon",
-          "min_size": 0.3,
-          "max_size": 1.0
+          "min_size": "0.3",
+          "max_size": "1.0"
         },
         {
           "name": "虹鱒魚",
           "rarity": "uncommon",
-          "min_size": 0.5,
-          "max_size": 1.5
+          "min_size": "0.5",
+          "max_size": "1.5"
         },
         {
           "name": "鮭魚",
           "rarity": "rare",
-          "min_size": 1.0,
-          "max_size": 3.5
+          "min_size": "1.0",
+          "max_size": "3.5"
         },
         {
           "name": "藍鰭金槍魚",
           "rarity": "rare",
-          "min_size": 2.0,
-          "max_size": 5.0
+          "min_size": "2.0",
+          "max_size": "5.0"
         },
         {
           "name": "鯨魚",
           "rarity": "legendary",
-          "min_size": 10.0,
-          "max_size": 20.0
+          "min_size": "10.0",
+          "max_size": "20.0"
         },
         {
           "name": "巨型石斑魚",
           "rarity": "legendary",
-          "min_size": 3.0,
-          "max_size": 6.0
+          "min_size": "3.0",
+          "max_size": "6.0"
         },
         {
           "name": "龍王鯛",
           "rarity": "legendary",
-          "min_size": 5.0,
-          "max_size": 10.0
+          "min_size": "5.0",
+          "max_size": "10.0"
         },
         {
           "name": "電鰻",
           "rarity": "rare",
-          "min_size": 1.5,
-          "max_size": 2.5
+          "min_size": "1.5",
+          "max_size": "2.5"
         },
         {
           "name": "大口黑鱸",
           "rarity": "uncommon",
-          "min_size": 0.8,
-          "max_size": 2.0
+          "min_size": "0.8",
+          "max_size": "2.0"
         },
         {
           "name": "大白鯊",
           "rarity": "legendary",
-          "min_size": 4.0,
-          "max_size": 7.0
+          "min_size": "47.0",
+          "max_size": "100.0"
         },
         {
           "name": "劍魚",
           "rarity": "rare",
-          "min_size": 2.0,
-          "max_size": 4.5
+          "min_size": "12.0",
+          "max_size": "42.5"
         },
         {
           "name": "紅點鮭",
           "rarity": "uncommon",
-          "min_size": 0.6,
-          "max_size": 1.8
+          "min_size": "0.6",
+          "max_size": "1.0"
         },
         {
           "name": "七彩神仙魚",
           "rarity": "common",
-          "min_size": 0.1,
-          "max_size": 0.5
+          "min_size": "0.1",
+          "max_size": "0.5"
         },
         {
           "name": "巨型魟魚",
           "rarity": "legendary",
-          "min_size": 3.0,
-          "max_size": 5.5
+          "min_size": "3.0",
+          "max_size": "5.0"
         },
         {
           "name": "綠翅魚",
           "rarity": "rare",
-          "min_size": 0.5,
-          "max_size": 1.2
+          "min_size": "0.5",
+          "max_size": "1.2"
         },
         {
           "name": "火焰鱒魚",
           "rarity": "uncommon",
-          "min_size": 0.7,
-          "max_size": 1.5
+          "min_size": "0.7",
+          "max_size": "1.5"
         },
         {
           "name": "帝王蝶魚",
           "rarity": "common",
-          "min_size": 0.2,
-          "max_size": 0.6
+          "min_size": "0.2",
+          "max_size": "0.6"
         },
         {
           "name": "海馬",
           "rarity": "common",
-          "min_size": 0.1,
-          "max_size": 0.3
+          "min_size": "0.1",
+          "max_size": "0.3"
         },
         {
           "name": "石斑魚",
           "rarity": "uncommon",
-          "min_size": 0.5,
-          "max_size": 1.0
+          "min_size": "0.5",
+          "max_size": "1.0"
         },
         {
           "name": "槍魚",
           "rarity": "rare",
-          "min_size": 1.0,
-          "max_size": 3.0
+          "min_size": "1.0",
+          "max_size": "3.0"
         },
         {
           "name": "龍蝦",
           "rarity": "uncommon",
-          "min_size": 0.3,
-          "max_size": 0.8
+          "min_size": "0.3",
+          "max_size": "0.8"
         },
         {
           "name": "虎鯨",
           "rarity": "legendary",
-          "min_size": 5.0,
-          "max_size": 9.0
+          "min_size": "5.0",
+          "max_size": "9.0"
         },
         {
           "name": "飛魚",
           "rarity": "rare",
-          "min_size": 0.5,
-          "max_size": 1.0
+          "min_size": "0.5",
+          "max_size": "1.0"
         },
         {
           "name": "章魚",
           "rarity": "uncommon",
-          "min_size": 0.5,
-          "max_size": 2.0
+          "min_size": "0.5",
+          "max_size": "2.0"
         },
         {
           "name": "鯊魚",
           "rarity": "legendary",
-          "min_size": 3.0,
-          "max_size": 6.0
+          "min_size": "3.0",
+          "max_size": "6.0"
         },
         {
           "name": "石頭魚",
           "rarity": "uncommon",
-          "min_size": 0.3,
-          "max_size": 1.0
+          "min_size": "0.3",
+          "max_size": "1.0"
         },
         {
           "name": "藍魔鬼魚",
           "rarity": "legendary",
-          "min_size": 2.0,
-          "max_size": 4.0
+          "min_size": "2.0",
+          "max_size": "4.0"
         },
         {
           "name": "水母",
           "rarity": "common",
-          "min_size": 0.2,
-          "max_size": 0.5
+          "min_size": "0.2",
+          "max_size": "0.5"
         },
         {
           "name": "燈籠魚",
           "rarity": "rare",
-          "min_size": 0.3,
-          "max_size": 1.0
+          "min_size": "0.3",
+          "max_size": "1.0"
         },
         {
           "name": "琵琶魚",
           "rarity": "rare",
-          "min_size": 0.4,
-          "max_size": 1.2
+          "min_size": "0.4",
+          "max_size": "1.2"
         },
         {
           "name": "大眼金槍魚",
           "rarity": "legendary",
-          "min_size": 3.0,
-          "max_size": 5.0
+          "min_size": "3.0",
+          "max_size": "5.0"
         },
         {
           "name": "巨型魷魚",
           "rarity": "legendary",
-          "min_size": 5.0,
-          "max_size": 8.0
+          "min_size": "5.0",
+          "max_size": "8.0"
         },
         {
           "name": "幽靈魚",
           "rarity": "legendary",
-          "min_size": 1.0,
-          "max_size": 2.0
+          "min_size": "1.0",
+          "max_size": "2.0"
         },
         {
           "name": "神秘螃蟹",
           "rarity": "legendary",
-          "min_size": 20.0,
-          "max_size": 50.0
+          "min_size": "20.0",
+          "max_size": "50.0"
         },
         {
           "name": "黑暗巨鯊",
           "rarity": "legendary",
-          "min_size": 7.0,
-          "max_size": 12.0
+          "min_size": "7.0",
+          "max_size": "12.0"
         },
         {
           "name": "冰霜龍魚",
           "rarity": "legendary",
-          "min_size": 3.0,
-          "max_size": 8.0
+          "min_size": "3.0",
+          "max_size": "8.0"
         },
         {
           "name": "雷霆鯨",
           "rarity": "legendary",
-          "min_size": 5.0,
-          "max_size": 15.0
+          "min_size": "5.0",
+          "max_size": "15.0"
         },
         {
           "name": "水龍",
           "rarity": "legendary",
-          "min_size": 10.0,
-          "max_size": 20.0
+          "min_size": "10.0",
+          "max_size": "20.0"
         },
         {
           "name": "魔幻金槍魚",
           "rarity": "legendary",
-          "min_size": 4.0,
-          "max_size": 9.0
+          "min_size": "4.0",
+          "max_size": "9.0"
         },
         {
           "name": "天幕鯨",
           "rarity": "legendary",
-          "min_size": 8.0,
-          "max_size": 16.0
+          "min_size": "8.0",
+          "max_size": "16.0"
         },
         {
           "name": "火焰巨龍",
           "rarity": "legendary",
-          "min_size": 15.0,
-          "max_size": 30.0
+          "min_size": "15.0",
+          "max_size": "30.0"
         },
         {
           "name": "銀翼鯨",
           "rarity": "legendary",
-          "min_size": 6.0,
-          "max_size": 12.0
+          "min_size": "6.0",
+          "max_size": "12.0"
         },
         {
           "name": "古代恐龍鯊",
           "rarity": "legendary",
-          "min_size": 10.0,
-          "max_size": 25.0
+          "min_size": "10.0",
+          "max_size": "25.0"
         },
         {
           "name": "虛無巨鯊",
           "rarity": "legendary",
-          "min_size": 9.0,
-          "max_size": 18.0
+          "min_size": "9.0",
+          "max_size": "18.0"
         },
         {
           "name": "狂風巨鯊",
           "rarity": "legendary",
-          "min_size": 8.5,
-          "max_size": 14.0
+          "min_size": "8.5",
+          "max_size": "14.0"
         },
         {
           "name": "深海魔王",
           "rarity": "legendary",
-          "min_size": 12.0,
-          "max_size": 22.0
+          "min_size": "12.0",
+          "max_size": "22.0"
         },
         {
           "name": "地心巨鯨",
           "rarity": "legendary",
-          "min_size": 11.0,
-          "max_size": 20.0
+          "min_size": "11.0",
+          "max_size": "20.0"
         },
         {
           "name": "隕石巨魚",
           "rarity": "legendary",
-          "min_size": 13.0,
-          "max_size": 25.0
+          "min_size": "13.0",
+          "max_size": "25.0"
         },
         {
           "name": "暗黑巨怪魚",
           "rarity": "legendary",
-          "min_size": 5.5,
-          "max_size": 11.0
+          "min_size": "5.5",
+          "max_size": "11.0"
         },
         {
           "name": "永夜巨蝦",
           "rarity": "legendary",
-          "min_size": 4.5,
-          "max_size": 9.5
+          "min_size": "4.5",
+          "max_size": "9.5"
         },
         {
           "name": "光明巨鱸",
           "rarity": "legendary",
-          "min_size": 7.5,
-          "max_size": 13.0
+          "min_size": "7.5",
+          "max_size": "13.0"
         },
         {
           "name": "深海巨龍",
           "rarity": "legendary",
-          "min_size": 8.0,
-          "max_size": 15.5
+          "min_size": "8.0",
+          "max_size": "15.5"
         },
         {
           "name": "黑暗海妖",
           "rarity": "legendary",
-          "min_size": 6.0,
-          "max_size": 12.0
+          "min_size": "6.0",
+          "max_size": "12.0"
         },
         {
           "name": "冰封巨鯊",
           "rarity": "legendary",
-          "min_size": 5.0,
-          "max_size": 11.0
+          "min_size": "5.0",
+          "max_size": "11.0"
         },
         {
           "name": "火山巨魚",
           "rarity": "legendary",
-          "min_size": 9.0,
-          "max_size": 18.0
+          "min_size": "9.0",
+          "max_size": "18.0"
         },
         {
           "name": "星辰巨鱗",
           "rarity": "legendary",
-          "min_size": 10.0,
-          "max_size": 20.0
+          "min_size": "10.0",
+          "max_size": "20.0"
         },
         {
           "name": "時空巨鯊",
           "rarity": "legendary",
-          "min_size": 10.5,
-          "max_size": 19.5
+          "min_size": "10.5",
+          "max_size": "19.5"
         },
         {
           "name": "雷暴巨鯽",
           "rarity": "legendary",
-          "min_size": 7.0,
-          "max_size": 15.0
+          "min_size": "7.0",
+          "max_size": "15.0"
         },
         {
           "name": "天使巨魚",
           "rarity": "legendary",
-          "min_size": 6.5,
-          "max_size": 14.5
+          "min_size": "6.5",
+          "max_size": "14.5"
         },
         {
           "name": "幽靈巨魚",
           "rarity": "legendary",
-          "min_size": 4.0,
-          "max_size": 8.0
+          "min_size": "4.0",
+          "max_size": "8.0"
         },
         {
           "name": "妖-幻魔海綿",
@@ -399,259 +399,259 @@
         {
           "name": "深淵幽影",
           "rarity": "unknown",
-          "min_size": 0.1,
-          "max_size": 999.9
+          "min_size": "0.1",
+          "max_size": "999.9"
         },
         {
           "name": "空洞魚靈",
           "rarity": "unknown",
-          "min_size": 1.0,
-          "max_size": 50.0
+          "min_size": "1.0",
+          "max_size": "50.0"
         },
         {
           "name": "幻影噬鯊",
           "rarity": "unknown",
-          "min_size": 10.0,
-          "max_size": 30.0
+          "min_size": "10.0",
+          "max_size": "30.0"
         },
         {
           "name": "星海之靈",
           "rarity": "unknown",
-          "min_size": 5.0,
-          "max_size": 25.0
+          "min_size": "5.0",
+          "max_size": "25.0"
         },
         {
           "name": "虛空魔鰩",
           "rarity": "unknown",
-          "min_size": 15.0,
-          "max_size": 45.0
+          "min_size": "15.0",
+          "max_size": "45.0"
         },
         {
           "name": "天穹鯨神",
           "rarity": "deify",
-          "min_size": 50.0,
-          "max_size": 100.0
+          "min_size": "50.0",
+          "max_size": "100.0"
         },
         {
           "name": "永恒海龍",
           "rarity": "deify",
-          "min_size": 30.0,
-          "max_size": 60.0
+          "min_size": "30.0",
+          "max_size": "60.0"
         },
         {
           "name": "無盡鯊神",
           "rarity": "deify",
-          "min_size": 70.0,
-          "max_size": 150.0
+          "min_size": "700.0",
+          "max_size": "1500.0"
         },
         {
           "name": "熾焰鯨皇",
           "rarity": "deify",
-          "min_size": 90.0,
-          "max_size": 200.0
+          "min_size": "90.0",
+          "max_size": "200.0"
         },
         {
           "name": "光輝金龍",
           "rarity": "deify",
-          "min_size": 40.0,
-          "max_size": 80.0
+          "min_size": "40.0",
+          "max_size": "80.0"
         },
         {
           "name": "裂空鳳魚",
           "rarity": "legendary",
-          "min_size": 8.0,
-          "max_size": 14.0
+          "min_size": "8.0",
+          "max_size": "14.0"
         },
         {
           "name": "蒼穹之眼",
           "rarity": "legendary",
-          "min_size": 12.0,
-          "max_size": 20.0
+          "min_size": "12.0",
+          "max_size": "20.0"
         },
         {
           "name": "絕影魔魚",
           "rarity": "legendary",
-          "min_size": 6.0,
-          "max_size": 13.0
+          "min_size": "6.0",
+          "max_size": "13.0"
         },
         {
           "name": "炎焰之心",
           "rarity": "legendary",
-          "min_size": 9.0,
-          "max_size": 18.0
+          "min_size": "9.0",
+          "max_size": "18.0"
         },
         {
           "name": "極寒巨魔魚",
           "rarity": "legendary",
-          "min_size": 10.0,
-          "max_size": 22.0
+          "min_size": "10.0",
+          "max_size": "22.0"
         },
         {
           "name": "沙丁魚",
           "rarity": "common",
-          "min_size": 0.1,
-          "max_size": 0.3
+          "min_size": "0.1",
+          "max_size": "0.3"
         },
         {
           "name": "鯖魚",
           "rarity": "common",
-          "min_size": 0.5,
-          "max_size": 1.0
+          "min_size": "0.5",
+          "max_size": "1.0"
         },
         {
           "name": "泥鰍",
           "rarity": "common",
-          "min_size": 0.2,
-          "max_size": 0.6
+          "min_size": "0.2",
+          "max_size": "0.6"
         },
         {
           "name": "白鰱",
           "rarity": "common",
-          "min_size": 0.3,
-          "max_size": 0.8
+          "min_size": "0.3",
+          "max_size": "0.8"
         },
         {
           "name": "牛尾魚",
           "rarity": "common",
-          "min_size": 0.2,
-          "max_size": 0.5
+          "min_size": "0.2",
+          "max_size": "0.5"
         },
         {
           "name": "紅眼魚",
           "rarity": "common",
-          "min_size": 0.2,
-          "max_size": 0.6
+          "min_size": "0.2",
+          "max_size": "0.6"
         },
         {
           "name": "小丑魚",
           "rarity": "common",
-          "min_size": 0.1,
-          "max_size": 0.3
+          "min_size": "0.1",
+          "max_size": "0.3"
         },
         {
           "name": "小石斑",
           "rarity": "common",
-          "min_size": 0.3,
-          "max_size": 0.7
+          "min_size": "0.3",
+          "max_size": "0.7"
         },
         {
           "name": "斑點魷魚",
           "rarity": "uncommon",
-          "min_size": 0.4,
-          "max_size": 1.2
+          "min_size": "0.4",
+          "max_size": "1.2"
         },
         {
           "name": "金翅魚",
           "rarity": "uncommon",
-          "min_size": 0.5,
-          "max_size": 1.0
+          "min_size": "0.5",
+          "max_size": "1.0"
         },
         {
           "name": "虎斑鮭",
           "rarity": "uncommon",
-          "min_size": 0.8,
-          "max_size": 1.5
+          "min_size": "0.8",
+          "max_size": "1.5"
         },
         {
           "name": "黃鰭鯖",
           "rarity": "uncommon",
-          "min_size": 1.0,
-          "max_size": 2.2
+          "min_size": "1.0",
+          "max_size": "2.2"
         },
         {
           "name": "短吻龍魚",
           "rarity": "uncommon",
-          "min_size": 0.7,
-          "max_size": 1.3
+          "min_size": "0.7",
+          "max_size": "1.3"
         },
         {
           "name": "銀線鯧",
           "rarity": "uncommon",
-          "min_size": 0.6,
-          "max_size": 1.1
+          "min_size": "0.6",
+          "max_size": "1.1"
         },
         {
           "name": "銀線鯧",
           "rarity": "uncommon",
-          "min_size": 0.6,
-          "max_size": 1.1
+          "min_size": "0.6",
+          "max_size": "1.1"
         },
         {
           "name": "條紋魷魚",
           "rarity": "uncommon",
-          "min_size": 0.5,
-          "max_size": 1.0
+          "min_size": "0.5",
+          "max_size": "1.0"
         },
         {
             "name": "紅背魴魚",
             "rarity": "uncommon",
-            "min_size": 0.5,
-            "max_size": 1.3
+            "min_size": "0.5",
+            "max_size": "1.3"
           },
           {
             "name": "火焰尾魚",
             "rarity": "rare",
-            "min_size": 1.0,
-            "max_size": 2.0
+            "min_size": "1.0",
+            "max_size": "2.0"
           },
           {
             "name": "黃金劍魚",
             "rarity": "rare",
-            "min_size": 2.0,
-            "max_size": 4.5
+            "min_size": "2.0",
+            "max_size": "4.5"
           },
           {
             "name": "翡翠青魚",
             "rarity": "rare",
-            "min_size": 1.5,
-            "max_size": 3.0
+            "min_size": "1.5",
+            "max_size": "3.0"
           },
           {
             "name": "黑金魟魚",
             "rarity": "rare",
-            "min_size": 2.0,
-            "max_size": 3.5
+            "min_size": "2.0",
+            "max_size": "3.5"
           },
           {
             "name": "深海紅鮭",
             "rarity": "rare",
-            "min_size": 1.0,
-            "max_size": 2.5
+            "min_size": "1.0",
+            "max_size": "2.5"
           },
           {
             "name": "魔幻銀槍魚",
             "rarity": "rare",
-            "min_size": 2.0,
-            "max_size": 5.0
+            "min_size": "2.0",
+            "max_size": "5.0"
           },
           {
             "name": "珊瑚海豚",
             "rarity": "rare",
-            "min_size": 1.5,
-            "max_size": 3.0
+            "min_size": "1.5",
+            "max_size": "3.0"
           },
           {
             "name": "暗光燈籠魚",
             "rarity": "rare",
-            "min_size": 0.8,
-            "max_size": 1.5
+            "min_size": "0.8",
+            "max_size": "1.5"
           },
           {
             "name": "紫斑電鰻",
             "rarity": "rare",
-            "min_size": 1.2,
-            "max_size": 2.2
+            "min_size": "1.0",
+            "max_size": "2.2"
           },
           {
             "name": "翡翠魷魚",
             "rarity": "rare",
-            "min_size": 1.5,
-            "max_size": 3.0
+            "min_size": "1.5",
+            "max_size": "3.0"
           },
           {
             "name": "黃瓜老瑞",
             "rarity": "unknown",
-            "min_size": 100.1,
+            "min_size": "100.1",
             "max_size": "1500.1"
           }
         ],
@@ -721,6 +721,18 @@
         "price": 50,
         "tax": 5.0,
         "MP": 10
+      },
+      {
+        "name": "大雜燴",
+        "price": 1300,
+        "tax": 23.0,
+        "MP": 55
+      },
+      {
+        "name": "俱滅煞鍋",
+        "price": 175000,
+        "tax": 1000.0,
+        "MP": 100
       }
     ]
   }
