@@ -424,37 +424,45 @@ async def about_me(ctx: discord.ApplicationContext):
     await ctx.respond(embed=embed)
 
 @bot.slash_command(name="blackjack", description="開啟21點遊戲")
-async def blackjack(ctx: discord.ApplicationContext, bet: int):
-    # 讀取用戶職業和餘額
+async def blackjack(ctx: discord.ApplicationContext, bet: float):
+    bet = round(bet, 2)
+
     user_id = str(ctx.author.id)
     guild_id = str(ctx.guild.id)
 
-    # 加載配置和餘額數據
+    def load_yaml(file):
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                return yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            return {}
+
+    def save_yaml(file, data):
+        with open(file, "w", encoding="utf-8") as f:
+            yaml.safe_dump(data, f, allow_unicode=True)
+
     config = load_yaml("config_user.yml")
     balance = load_yaml("balance.yml")
 
-    # 獲取用戶職業
     player_job = config.get(user_id, {}).get("job", "")
 
-    # 檢查用戶餘額是否足夠下注
-    user_balance = balance.get(guild_id, {}).get(user_id, 0)
+    user_balance = round(balance.get(guild_id, {}).get(user_id, 0), 2)
     if user_balance < bet:
         await ctx.respond(embed=discord.Embed(
             title="餘額不足！",
-            description=f"你當前的餘額是 {user_balance} 幽靈幣，無法下注 {bet} 幽靈幣。",
+            description=f"你當前的餘額是 {user_balance:.2f} 幽靈幣，無法下注 {bet:.2f} 幽靈幣。",
             color=discord.Color.red()
         ))
         return
 
-    # 更新用戶餘額
-    balance.setdefault(guild_id, {})[user_id] = user_balance - bet
+    balance.setdefault(guild_id, {})[user_id] = round(user_balance - bet, 2)
     save_yaml("balance.yml", balance)
 
-    # Blackjack 遊戲邏輯
     player_cards = []
     dealer_cards = []
 
     def calculate_hand(cards):
+        """計算手牌點數"""
         value = 0
         aces = 0
         for card in cards:
@@ -473,21 +481,24 @@ async def blackjack(ctx: discord.ApplicationContext, bet: int):
         return value
 
     def draw_card():
+        """隨機抽牌"""
         deck = [2, 3, 4, 5, 6, 7, 8, 9, 10, "J", "Q", "K", "A"]
         return random.choice(deck)
 
-    # 初始化玩家和莊家的牌
     player_cards = [draw_card(), draw_card()]
     dealer_cards = [draw_card(), draw_card()]
 
     embed = discord.Embed(
         title="21點遊戲開始！",
-        description=f"你下注了 **{bet} 幽靈幣**\n你的初始手牌: {player_cards}\n莊家的明牌: {dealer_cards[0]}",
-        color=discord.Color.from_rgb(204, 0, 51)  # 狂賭深淵紅
+        description=(
+            f"你下注了 **{bet:.2f} 幽靈幣**\n"
+            f"你的初始手牌: {player_cards} (總點數: {calculate_hand(player_cards)})\n"
+            f"莊家的明牌: {dealer_cards[0]}"
+        ),
+        color=discord.Color.from_rgb(204, 0, 51)
     )
     embed.set_footer(text="選擇你的操作！")
 
-    # 按鈕設置
     class BlackjackButtons(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=120)
@@ -524,16 +535,16 @@ async def blackjack(ctx: discord.ApplicationContext, bet: int):
             player_total = calculate_hand(player_cards)
 
             if dealer_total > 21 or player_total > dealer_total:
-                reward = bet * 2
+                reward = round(bet * 2, 2)
                 if player_job == "賭徒":
-                    reward += bet * 2  # 賭徒額外獎勵
+                    reward += round(bet * 2, 2)
                 balance[guild_id][user_id] += reward
                 save_yaml("balance.yml", balance)
 
                 embed = discord.Embed(
                     title="恭賀，你贏了！",
-                    description=f"莊家的手牌: {dealer_cards}\n你的獎勵: {reward} 幽靈幣",
-                    color=discord.Color.from_rgb(0, 204, 51)  # 綠色
+                    description=f"莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
+                    color=discord.Color.from_rgb(0, 204, 51)
                 )
             else:
                 embed = discord.Embed(
@@ -549,6 +560,7 @@ async def blackjack(ctx: discord.ApplicationContext, bet: int):
             nonlocal player_cards
             nonlocal bet
             bet *= 2
+            bet = round(bet, 2)  # 確保賭資保留兩位小數
             player_cards.append(draw_card())
             player_total = calculate_hand(player_cards)
 
@@ -565,16 +577,16 @@ async def blackjack(ctx: discord.ApplicationContext, bet: int):
                     dealer_total = calculate_hand(dealer_cards)
 
                 if dealer_total > 21 or player_total > dealer_total:
-                    reward = bet * 2
+                    reward = round(bet * 2, 2)
                     if player_job == "賭徒":
-                        reward += bet * 2  # 賭徒額外獎勵
+                        reward += round(bet * 2, 2)
                     balance[guild_id][user_id] += reward
                     save_yaml("balance.yml", balance)
 
                     embed = discord.Embed(
                         title="恭賀，你贏了！",
-                        description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}\n你的獎勵: {reward} 幽靈幣",
-                        color=discord.Color.from_rgb(0, 204, 51)  # 綠色
+                        description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
+                        color=discord.Color.from_rgb(0, 204, 51)
                     )
                 else:
                     embed = discord.Embed(
@@ -2000,10 +2012,14 @@ async def fish(ctx: discord.ApplicationContext):
 
     current_rod = "測試員魚竿"
 
-    selected_fish = random.choice(fish_data)
-    fish_name = selected_fish["name"]
-    fish_rarity = selected_fish["rarity"]
-    fish_size = round(random.uniform(float(selected_fish["min_size"]), float(selected_fish["max_size"])), 2)
+    def generate_fish_data():
+        selected_fish = random.choice(fish_data)
+        fish_name = selected_fish["name"]
+        fish_rarity = selected_fish["rarity"]
+        fish_size = round(random.uniform(float(selected_fish["min_size"]), float(selected_fish["max_size"])), 2)
+        return {"name": fish_name, "rarity": fish_rarity, "size": fish_size}
+
+    latest_fish_data = generate_fish_data()
 
     rarity_colors = {
         "common": discord.Color.green(),
@@ -2013,22 +2029,25 @@ async def fish(ctx: discord.ApplicationContext):
         "deify": discord.Color.gold(),
         "unknown": discord.Color.dark_gray(),
     }
-    embed_color = rarity_colors.get(fish_rarity, discord.Color.light_gray())
+    embed_color = rarity_colors.get(latest_fish_data["rarity"], discord.Color.light_gray())
 
-    embed = discord.Embed(
-        title="釣魚結果！",
-        description=f"使用魚竿：{current_rod}",
-        color=embed_color
-    )
-    embed.add_field(name="捕獲魚種", value=fish_name, inline=False)
-    embed.add_field(name="稀有度", value=fish_rarity.capitalize(), inline=True)
-    embed.add_field(name="重量", value=f"{fish_size} 公斤", inline=True)
-    embed.set_footer(text="釣魚協會祝您 天天釣到大魚\n祝你每次都空軍")
+    def create_fishing_embed(fish_data):
+        embed = discord.Embed(
+            title="釣魚結果！",
+            description=f"使用魚竿：{current_rod}",
+            color=rarity_colors.get(fish_data["rarity"], discord.Color.light_gray())
+        )
+        embed.add_field(name="捕獲魚種", value=fish_data["name"], inline=False)
+        embed.add_field(name="稀有度", value=fish_data["rarity"].capitalize(), inline=True)
+        embed.add_field(name="重量", value=f"{fish_data['size']} 公斤", inline=True)
+        embed.set_footer(text="釣魚協會祝您 天天釣到大魚\n祝你每次都空軍")
+        return embed
 
     class FishingButtons(discord.ui.View):
-        def __init__(self, author_id):
+        def __init__(self, author_id, fish_data):
             super().__init__()
             self.author_id = author_id
+            self.latest_fish_data = fish_data
 
         async def interaction_check(self, interaction: discord.Interaction):
             if interaction.user.id != self.author_id:
@@ -2044,7 +2063,11 @@ async def fish(ctx: discord.ApplicationContext):
 
             await asyncio.sleep(2)
 
-            await self.refresh_fishing_result(interaction)
+            self.latest_fish_data = generate_fish_data()
+            new_embed = create_fishing_embed(self.latest_fish_data)
+
+            new_view = FishingButtons(self.author_id, self.latest_fish_data)
+            await interaction.edit_original_response(embed=new_embed, view=new_view)
 
         @discord.ui.button(label="保存漁獲", style=discord.ButtonStyle.blurple)
         async def save_fish(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -2060,9 +2083,9 @@ async def fish(ctx: discord.ApplicationContext):
                 fishiback_data[user_id][guild_id] = {"fishes": []}
 
             fishiback_data[user_id][guild_id]["fishes"].append({
-                "name": fish_name,
-                "rarity": fish_rarity,
-                "size": fish_size,
+                "name": self.latest_fish_data["name"],
+                "rarity": self.latest_fish_data["rarity"],
+                "size": self.latest_fish_data["size"],
                 "rod": current_rod
             })
 
@@ -2074,31 +2097,9 @@ async def fish(ctx: discord.ApplicationContext):
             self.remove_item(button)
             await interaction.response.edit_message(view=self)
 
-        async def refresh_fishing_result(self, interaction: discord.Interaction):
-            with open("config.json", "r", encoding="utf-8") as config_file:
-                fish_data = json.load(config_file)["fish"]
+    view = FishingButtons(ctx.user.id, latest_fish_data)
+    embed = create_fishing_embed(latest_fish_data)
 
-            selected_fish = random.choice(fish_data)
-            fish_name = selected_fish["name"]
-            fish_rarity = selected_fish["rarity"]
-            fish_size = round(random.uniform(float(selected_fish["min_size"]), float(selected_fish["max_size"])), 2)
-
-            embed_color = rarity_colors.get(fish_rarity, discord.Color.light_gray())
-
-            embed = discord.Embed(
-                title="釣魚結果！",
-                description="使用魚竿：測試員魚竿",
-                color=embed_color
-            )
-            embed.add_field(name="捕獲魚種", value=fish_name, inline=False)
-            embed.add_field(name="稀有度", value=fish_rarity.capitalize(), inline=True)
-            embed.add_field(name="重量", value=f"{fish_size} 公斤", inline=True)
-            embed.set_footer(text="釣魚協會祝您 天天釣到大魚\n祝你每次都空軍")
-
-            new_view = FishingButtons(self.author_id)
-            await interaction.edit_original_response(embed=embed, view=new_view)
-
-    view = FishingButtons(ctx.user.id)
     await ctx.respond(embed=embed, view=view)
 
 @bot.slash_command(name="fish_rod", description="切換魚杆")
