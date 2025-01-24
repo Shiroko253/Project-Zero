@@ -455,11 +455,50 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
         ))
         return
 
+    if bet > 100_000_000.00:
+        embed = discord.Embed(
+            title="高額賭注！",
+            description="你的賭注超過 100,000,000。你是否要購買保險？\n\n**保險金額為一半的賭注金額**，如果莊家有Blackjack，你將獲得2倍保險金額作為賠付。",
+            color=discord.Color.gold()
+        )
+        view = discord.ui.View()
+
+        class InsuranceButtons(discord.ui.View):
+            def __init__(self):
+                super().__init__(timeout=30)
+                self.insurance = False
+
+            @discord.ui.button(label="購買保險", style=discord.ButtonStyle.success)
+            async def buy_insurance(self, button: discord.ui.Button, interaction: discord.Interaction):
+                self.insurance = True
+                self.stop()
+
+            @discord.ui.button(label="放棄保險", style=discord.ButtonStyle.danger)
+            async def decline_insurance(self, button: discord.ui.Button, interaction: discord.Interaction):
+                self.insurance = False
+                self.stop()
+
+        view = InsuranceButtons()
+        await ctx.respond(embed=embed, view=view)
+        await view.wait()
+
+        insurance_bought = view.insurance
+    else:
+        insurance_bought = False
+
+    # 從餘額中扣除下注金額
     balance.setdefault(guild_id, {})[user_id] = round(user_balance - bet, 2)
     save_yaml("balance.yml", balance)
 
-    player_cards = []
-    dealer_cards = []
+    def create_deck():
+        return [2, 3, 4, 5, 6, 7, 8, 9, 10, "J", "Q", "K", "A"] * 4
+
+    deck = create_deck()
+    random.shuffle(deck)
+
+    def draw_card():
+        """從洗好的牌堆抽一張牌"""
+        return deck.pop()
 
     def calculate_hand(cards):
         """計算手牌點數"""
@@ -480,21 +519,25 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
 
         return value
 
-    def draw_card():
-        """隨機抽牌"""
-        deck = [2, 3, 4, 5, 6, 7, 8, 9, 10, "J", "Q", "K", "A"]
-        return random.choice(deck)
-
     player_cards = [draw_card(), draw_card()]
     dealer_cards = [draw_card(), draw_card()]
 
+    if insurance_bought and calculate_hand(dealer_cards) == 21:
+        insurance_payout = round(bet / 2 * 2, 2)
+        balance[guild_id][user_id] += insurance_payout
+        save_yaml("balance.yml", balance)
+        await ctx.respond(embed=discord.Embed(
+            title="保險賠付成功！",
+            description=f"莊家的手牌是 {dealer_cards}，你獲得了保險賠付 {insurance_payout:.2f} 幽靈幣。",
+            color=discord.Color.gold()
+        ))
+        return
+
     embed = discord.Embed(
         title="21點遊戲開始！",
-        description=(
-            f"你下注了 **{bet:.2f} 幽靈幣**\n"
-            f"你的初始手牌: {player_cards} (總點數: {calculate_hand(player_cards)})\n"
-            f"莊家的明牌: {dealer_cards[0]}"
-        ),
+        description=(f"你下注了 **{bet:.2f} 幽靈幣**\n"
+                     f"你的初始手牌: {player_cards} (總點數: {calculate_hand(player_cards)})\n"
+                     f"莊家的明牌: {dealer_cards[0]}"),
         color=discord.Color.from_rgb(204, 0, 51)
     )
     embed.set_footer(text="選擇你的操作！")
@@ -526,7 +569,7 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
 
         @discord.ui.button(label="棄牌 (Fold)", style=discord.ButtonStyle.danger)
         async def fold(self, button: discord.ui.Button, interaction: discord.Interaction):
-            nonlocal dealer_cards
+            # 結算莊家牌
             dealer_total = calculate_hand(dealer_cards)
             while dealer_total < 17:
                 dealer_cards.append(draw_card())
@@ -537,14 +580,15 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             if dealer_total > 21 or player_total > dealer_total:
                 reward = round(bet * 2, 2)
                 if player_job == "賭徒":
-                    reward += round(bet * 2, 2)
+                    reward += bet
+                    reward *= 2
                 balance[guild_id][user_id] += reward
                 save_yaml("balance.yml", balance)
 
                 embed = discord.Embed(
                     title="恭賀，你贏了！",
                     description=f"莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
-                    color=discord.Color.from_rgb(0, 204, 51)
+                    color=discord.Color.gold()
                 )
             else:
                 embed = discord.Embed(
@@ -560,7 +604,7 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             nonlocal player_cards
             nonlocal bet
             bet *= 2
-            bet = round(bet, 2)  # 確保賭資保留兩位小數
+            bet = round(bet, 2)
             player_cards.append(draw_card())
             player_total = calculate_hand(player_cards)
 
@@ -579,14 +623,15 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
                 if dealer_total > 21 or player_total > dealer_total:
                     reward = round(bet * 2, 2)
                     if player_job == "賭徒":
-                        reward += round(bet * 2, 2)
+                        reward += bet
+                        reward *= 2
                     balance[guild_id][user_id] += reward
                     save_yaml("balance.yml", balance)
 
                     embed = discord.Embed(
                         title="恭賀，你贏了！",
                         description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
-                        color=discord.Color.from_rgb(0, 204, 51)
+                        color=discord.Color.gold()
                     )
                 else:
                     embed = discord.Embed(
@@ -1002,10 +1047,10 @@ async def work(interaction: discord.Interaction):
     if job_name == "賭徒":
         embed = discord.Embed(
             title="工作系統",
-            description=("你選擇了追求刺激的道路，工作對於賭徒來說太枯燥了，不如使用 `/blackjack` 來靠技術和運氣翻身！"),
-            color=discord.Color.from_str("#6A0DAD")
+            description=("你選擇了刺激的道路，工作？ 哼~ 那對於我來説太枯燥了，賭博才是工作的樂趣！"),
+            color=discord.Color.from_rgb(255, 0, 0)
         )
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=False)
         return
 
     job_rewards = jobs_dict.get(job_name)
@@ -1763,7 +1808,7 @@ async def timeout(interaction: discord.Interaction, member: discord.Member, dura
                 color=discord.Color.dark_red()
             )
             embed.set_footer(text="請遵守伺服器規則")
-            await interaction.followup.send(embed=embed)
+            await interaction.followup.send(embed=embed, ephemeral=False)
         except discord.Forbidden:
             embed = discord.Embed(
                 title="❌ 無法禁言",
