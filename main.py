@@ -1453,7 +1453,8 @@ async def start_giveaway(interaction: discord.Interaction, duration: int, prize:
 
 @bot.slash_command(name="clear", description="清除指定数量的消息")
 async def clear(interaction: discord.Interaction, amount: int):
-    await interaction.response.defer(thinking=True)
+    # 使用 ephemeral defer，讓回應僅對使用者可見
+    await interaction.response.defer(ephemeral=True)
 
     if not interaction.user.guild_permissions.administrator:
         embed = discord.Embed(
@@ -1485,11 +1486,7 @@ async def clear(interaction: discord.Interaction, amount: int):
     cutoff_date = datetime.now(tz=timezone.utc) - timedelta(days=14)
 
     try:
-        deleted = await interaction.channel.purge(
-            limit=amount,
-            check=lambda m: m.created_at >= cutoff_date
-        )
-
+        deleted = await interaction.channel.purge(limit=amount, after=cutoff_date)
         if deleted:
             embed = discord.Embed(
                 title="✅ 清理成功",
@@ -1511,17 +1508,19 @@ async def clear(interaction: discord.Interaction, amount: int):
             color=0xFF0000
         )
         await interaction.followup.send(embed=embed)
+
     except discord.HTTPException as e:
         embed = discord.Embed(
             title="❌ 清理失敗",
-            description=f"發生錯誤：{e}",
+            description=f"發生 API 錯誤：{e.text if hasattr(e, 'text') else str(e)}",
             color=0xFF0000
         )
         await interaction.followup.send(embed=embed)
+
     except Exception as e:
         embed = discord.Embed(
             title="❌ 清理失敗",
-            description="發生未知錯誤，請稍後再試。",
+            description=f"發生未知錯誤：{str(e)}",
             color=0xFF0000
         )
         await interaction.followup.send(embed=embed)
