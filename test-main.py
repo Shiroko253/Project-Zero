@@ -1,13 +1,12 @@
 import discord
 from discord.ext import commands
-from discord import app_commands
 import os
 import sys
 import random
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
-from discord.ui import Select, Button, View, Modal, TextInput
+from discord.ui import Select, Button, View, Modal, input_text
 import subprocess
 import time
 from dotenv import load_dotenv
@@ -24,151 +23,115 @@ import calculator
 import math
 from calendar_module import add_event, remove_event, get_user_events, check_events, CalendarEvent
 from omikuji import draw_lots
-import re 
+import re
+from decimal import Decimal, ROUND_DOWN
+from discord import Interaction
+import shutil
 
 load_dotenv()
 
-TOKEN = os.getenv('DISCORD_TOKEN_TEST_BOT')
-AUTHOR_ID = int(os.getenv('AUTHOR_ID'))
-LOG_FILE_PATH = "test_bot_feedback_log.txt"
+TOKEN = os.getenv("DISCORD_TOKEN_TEST_BOT")
+AUTHOR_ID = int(os.getenv('AUTHOR_ID', 0))
+WORK_COOLDOWN_SECONDS = 230
 
-logging.basicConfig(level=logging.INFO)
+if not TOKEN or not AUTHOR_ID:
+    raise ValueError("You lots the discord bot token and aothor_id pls chack you'r .env file")
 
-error_logger = logging.getLogger('discord')
-error_logger.setLevel(logging.ERROR)
-error_handler = logging.FileHandler(filename='error.log', encoding='utf-8', mode='w')
-error_handler.setFormatter(logging.Formatter('%(asctime)s:%(levelname)s:%(name)s: %(message)s'))
-error_logger.addHandler(error_handler)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(filename='main-error.log', encoding='utf-8', mode='w'),
+        logging.StreamHandler()
+    ]
+)
+
+def load_yaml(file_name, default=None):
+    if default is None:
+        default = {}
+    """通用 YAML 文件加載函數"""
+    try:
+        with open(file_name, 'r', encoding='utf-8') as f:
+            return yaml.safe_load(f) or default
+    except FileNotFoundError:
+        print(f"{file_name} 文件未找到。")
+        return default
+    except yaml.YAMLError as e:
+        print(f"{file_name} 加載錯誤: {e}")
+        return default
+
+def save_yaml(file_name, data):
+    """通用 YAML 文件保存函數"""
+    with open(file_name, 'w', encoding='utf-8') as f:
+        yaml.dump(data, f, allow_unicode=True)
+
+def load_json(file_name, default=None):
+    if default is None:
+        default = {}
+    """通用 JSON 文件加載函數"""
+    try:
+        with open(file_name, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"{file_name} 加載錯誤: {e}")
+        return default
+
+def save_json(file_name, data):
+    """通用 JSON 文件保存函數"""
+    with open(file_name, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=4)
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.messages = True
+intents.guilds = True
 intents.members = True
-user_messages = {}
-participants = []
+bot = commands.Bot(command_prefix='!', intents=intents)
 
-bot = commands.Bot(command_prefix='/', intents=intents)
+user_balance = load_yaml('test-balance.yml')
+config = load_json("config.json")
+user_data = load_yaml("config_user.yml")
+quiz_data = load_yaml('quiz.yml')
+rpg_data = load_json("rpg_config.json")
+raw_jobs = config.get("jobs", [])
+jobs_data = {job: details for item in raw_jobs for job, details in item.items()}
+fish_data = config.get("fish", {})
+shop_data = config.get("shop_item", {})
+rpg_data = load_json("rpg_config.json")
 
-user_balance = {}
+if not jobs_data:
+    print("警告: 職業數據 (jobs) 為空！請檢查 config.json 文件。")
+if not fish_data:
+    print("警告: 魚類數據 (fish) 為空！請檢查 config.json 文件。")
+if not shop_data:
+    print("警告: 商店數據 (shop_item) 為空！請檢查 config.json 文件。")
 
-def save_balance(data):
-    with open('balance.yml', 'w', encoding='utf-8') as f:
-        yaml.dump(data, f, allow_unicode=True)
+dm_messages = load_json('dm_messages.json')
+questions = load_yaml('trivia_questions.yml', {}).get('questions', [])
+user_rod = load_yaml('user_rod.yml', {})
 
-def load_balance():
-    if os.path.exists('balance.yml'):
-        try:
-            with open('balance.yml', 'r', encoding='utf-8') as f:
-                return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            print("Error loading balance.yml:", e)
-            with open('balance.yml', 'r', encoding='utf-8') as f:
-                print("Problematic file contents:")
-                print(f.read())
-    return {}
-
-user_balance = load_balance()
-
-with open('fishi.yml', 'r', encoding='utf-8') as file:
-    fish_data = yaml.safe_load(file)
-
-with open('fishi_shop.yml', 'r', encoding='utf-8') as file:
-    shop_data = yaml.safe_load(file)
-
-def save_data(data, filename="candyrank.json"):
-    with open(filename, "w") as f:
-        json.dump(data, f, indent=4)
-
-def load_data(filename="candyrank.json"):
-    if os.path.exists(filename):
-        with open(filename, "r") as f:
-            return json.load(f)
-    return {}
-
-candy_collection = load_data()
-
-trick_cooldown = {}
-daily_trick_count = {}
-daily_reset_time = {}
-last_candy_collect = {}
-cooldowns = {}
-
-def reset_daily_limit(user_id):
-    now = datetime.now()
-    if user_id in daily_reset_time and daily_reset_time[user_id].date() != now.date():
-        daily_trick_count[user_id] = 0
-        daily_reset_time[user_id] = now
-
-def load_cooldown_data(cooldown_file):
-    try:
-        with open(cooldown_file, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-
-def save_cooldown_data(data, cooldown_file):
-    with open(cooldown_file, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
-
-def is_on_cooldown(user_id, cooldown_file, cooldown_hours):
-    cooldown_data = load_cooldown_data(cooldown_file)
-    if str(user_id) in cooldown_data:
-        last_used = datetime.fromisoformat(cooldown_data[str(user_id)])
-        if datetime.now() - last_used < timedelta(hours=cooldown_hours):
-            remaining = timedelta(hours=cooldown_hours) - (datetime.now() - last_used)
-            hours, remainder = divmod(remaining.seconds, 3600)
-            minutes = remainder // 60
-            return True, f"{hours} 小時 {minutes} 分鐘"
-    return False, None
-
-def update_cooldown(user_id, cooldown_file):
-    cooldown_data = load_cooldown_data(cooldown_file)
-    cooldown_data[str(user_id)] = datetime.now().isoformat()
-    save_cooldown_data(cooldown_data, cooldown_file)
-
-def load_config():
-    if not os.path.exists("config.yml"):
-        default_config = {
-            "mention_counts": {}
-        }
-        save_config(default_config)
-        return default_config
-
-    with open("config.yml", "r", encoding="utf-8") as file:
-        return yaml.safe_load(file)
-
-def save_config(config):
-    with open("config.yml", "w", encoding="utf-8") as file:
-        yaml.safe_dump(config, file)
-
-config = load_config()
-mention_counts = config.get("mention_counts", {})
+if not os.path.exists('user_rod.yml'):
+    save_yaml('user_rod.yml', {})
 
 @bot.event
 async def on_ready():
-    print(f'已登入 {bot.user.name}')
-    
-    await bot.change_presence(
-        status=discord.Status.idle,
-        activity = discord.Activity(type=discord.ActivityType.listening, name="No Dazzle, No Braek feat:Rappa")
-    )
-    
+    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    print("------")
+
+    print("Slash commands are automatically synchronized.")
+
     try:
-        synced = await bot.tree.sync()
-        print(f'成功同步 {len(synced)} 个命令')
+        await bot.change_presence(
+            status=discord.Status.dnd,
+            activity=discord.Activity(type=discord.ActivityType.streaming, name='Monster Hunter', url="https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        )
+        print("The bot's status has been set.")
     except Exception as e:
-        print(f'同步命令时出错: {e}')
-        error_logger.error(f'同步命令时出错: {e}', exc_info=True)
-    
-        last_activity_time = time.time()
-        check_events.start(bot)
+        print(f"Failed to set presence: {e}")
 
 @bot.event
 async def on_message(message):
     global last_activity_time
     last_activity_time = time.time()
-    user_id = str(message.author.id)
-    guild_id = str(message.guild.id)
     if message.author == bot.user:
         return
 
@@ -186,12 +149,9 @@ async def on_message(message):
     elif '芙蘭的生日' in content_lower:
         await message.channel.send('機器人芙蘭的生日在<t:1722340500:D>')
 
-    elif '熊貓' in content_lower:
-        await message.channel.send('Miya253:幹嘛 我現在在修著幽幽子 有事情的話請DM我 謝謝')
-
-    elif message.content.startswith('關閉芙蘭'):
+    elif message.content.startswith('芙蘭去睡覺吧'):
         if message.author.id == AUTHOR_ID:
-            await message.channel.send("正在關閉...")
+            await message.channel.send("好! 我去睡了 晚安 大哥哥")
             await asyncio.sleep(5)
             await bot.close()
         else:
@@ -204,687 +164,512 @@ async def on_message(message):
             await bot.close()
         else:
             await message.channel.send("你無權重啓我 >_<")
-
-    elif "抽籤" in message.content:
-        result = draw_lots()
-        await message.channel.send(f"你抽出的御神籤的結果是:\n{result}")
-        
-    if message.author == message.guild.owner or any(role.permissions.administrator for role in message.author.roles):
-        await bot.process_commands(message)
-        return
     
-    if message.author.bot and ("@everyone" in message.content or "@here" in message.content):
-        try:
-            await message.channel.send(f"{message.author.mention} 被檢測到濫用全體標註，將被直接踢出或封禁。")
-            await message.author.ban(reason="濫用全體標註")
-        except discord.Forbidden:
-            await message.channel.send(f"無法封禁 {message.author.mention}，請求管理員提高機器人權限。")
-        return
-    
-    if "@everyone" in message.content or "@here" in message.content:
-        if user_id not in mention_counts:
-            mention_counts[user_id] = 1
-        else:
-            mention_counts[user_id] += 1
-
-        if mention_counts[user_id] == 1:
-            await message.channel.send(f"{message.author.mention} 請勿使用全體標註！這是您的第一次警告。")
-
-        elif mention_counts[user_id] == 2:
-            await message.channel.send(f"{message.author.mention} 已經多次使用全體標註，將被踢出伺服器。")
-            try:
-                await message.author.kick(reason="多次使用全體標註")
-            except discord.Forbidden:
-                await message.channel.send(f"無法踢出 {message.author.mention}，請求管理員提高機器人權限。")
-
-        elif mention_counts[user_id] >= 3:
-            await message.channel.send(f"{message.author.mention} 已被永久封禁。")
-            try:
-                await message.author.ban(reason="多次使用全體標註")
-            except discord.Forbidden:
-                await message.channel.send(f"無法封禁 {message.author.mention}，請求管理員提高機器人權限。")
-                
-        await message.delete()
-        return
-    
+    if '早安芙蘭' in content_lower:
+        await message.channel.send('您好 我是芙蘭醬喲')
+        await asyncio.sleep(3)
+        await message.channel.send("欸大哥哥 你在説什麽？ 來配我玩吧~")
+            
     await bot.process_commands(message)
 
-@bot.tree.command(name="shutdown", description="关闭芙蘭")
-async def shutdown(interaction: discord.Interaction):
-    if interaction.user.id == AUTHOR_ID:
-        await interaction.response.send_message("关闭中...")
-        await bot.close()
-    else:
-        await interaction.response.send_message("你没有权限执行此操作。")
-
-@bot.tree.command(name="restart", description="重启芙蘭")
+@bot.slash_command(name="restart", description="重启机器人")
 async def restart(interaction: discord.Interaction):
     if interaction.user.id == AUTHOR_ID:
-        await interaction.response.defer()
-        await interaction.followup.send("重启中...")
-        os.execv(sys.executable, ['python'] + sys.argv)
+        try:
+            await interaction.response.defer(ephemeral=True)
+            await interaction.followup.send("重启中...")
+            os.execv(sys.executable, ['python'] + sys.argv)
+        except Exception as e:
+            print(f"Restart command failed: {e}")
     else:
-        await interaction.response.send_message("你没有权限执行此操作。")
+        await interaction.response.send_message("你没有权限执行此操作。", ephemeral=True)
 
-@bot.tree.command(name="balance", description="查询你的幽灵币余额")
-async def balance(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    try:
-        with open('balance.yml', 'r') as file:
-            balances = yaml.safe_load(file)
-        
-        user_balance = balances.get(user_id, 0)
-        await interaction.response.send_message(f"你的幽灵币余额为: {user_balance}")
-    except FileNotFoundError:
-        await interaction.response.send_message("balance.yml 文件未找到，无法查询余额。")
+@bot.slash_command(name="shutdown", description="关闭机器人")
+async def shutdown(interaction: discord.Interaction):
+    if interaction.user.id == AUTHOR_ID:
+        try:
+            await interaction.response.defer(ephemeral=True)
 
-@bot.tree.command(name="addmoney", description="给用户增加幽靈幣（管理员专用）")
-async def addmoney(interaction: discord.Interaction, member: discord.Member, amount: int):
-    if interaction.user.guild_permissions.administrator:
-        recipient_id = str(member.id)
-        user_balance[recipient_id] = user_balance.get(recipient_id, 0) + amount
-        save_balance(user_balance)
-        await interaction.response.send_message(f'给 {member.name} 增加了 {amount} 幽靈幣。')
+            await interaction.followup.send("关闭中...")
+
+            await bot.close()
+        except Exception as e:
+            logging.error(f"Shutdown command failed: {e}")
+            await interaction.followup.send(f"关闭失败，错误信息：{e}", ephemeral=True)
     else:
-        await interaction.response.send_message("你没有权限执行此操作。")
+        await interaction.response.send_message("你没有权限执行此操作。", ephemeral=True)
 
-@bot.tree.command(name="rpg_start", description="初始化角色数据")
+@bot.slash_command(name="rpg-start", description="開啓你的RPG冒險之旅")
 async def rpg_start(interaction: discord.Interaction):
+    
+    guild_id = str(interaction.guild.id)
     user_id = str(interaction.user.id)
-    data = {
-        'lv': 1,
-        'exp': 0,
-        'hp': 100,
-        'mp': 50,
-        'stamina': 50
-    }
 
-    if not os.path.exists('rpg-data'):
-        os.makedirs('rpg-data')
+    balance_data = load_yaml("test-balance.yml")
+    user_balance = balance_data.get(guild_id, {}).get(user_id, 0)
+    rpg_data = load_json("rpg_config.json")
 
-    with open(f'rpg-data/{user_id}.yml', 'w') as file:
-        yaml.dump(data, file)
-
-    await interaction.response.send_message("角色已初始化，开始你的冒险吧！")
-
-@bot.tree.command(name="rpg_info", description="查看角色信息")
-async def rpg_info(interaction: discord.Interaction):
-    user_id = str(interaction.user.id)
-    try:
-        with open(f'rpg-data/{user_id}.yml', 'r') as file:
-            player_data = yaml.safe_load(file)
+    if guild_id in rpg_data and user_id in rpg_data[guild_id]:
         await interaction.response.send_message(
-            f"等級: {player_data['lv']}\n"
-            f"生命: {player_data['hp']}\n"
-            f"魔力: {player_data['mp']}\n"
-            f"體力: {player_data['stamina']}"
+            "⚠️ 你已經初始化一次了，無法再次使用該指令。",
+            ephemeral=True
         )
-    except FileNotFoundError:
-        await interaction.response.send_message("你还没有初始化角色，请使用 `/rpg_start` 初始化。")
+        return
 
-@bot.tree.command(name="rpg_backpack", description="开启背包")
-async def rpg_backpack(interaction: discord.Interaction):
+    if guild_id not in rpg_data:
+        rpg_data[guild_id] = {}
+
+    rpg_data[guild_id][user_id] = {
+        "等級": 1,
+        "經驗值": 0,
+        "升級需求": 100,
+        "職業": "無業游民",
+        "魔力": "100/100",
+        "防禦": "0/20",
+        "體力": "20/20"
+    }
+    save_json("rpg_config.json", rpg_data)
+    
+    avatar_url = interaction.user.display_avatar.url
+    embed_color = discord.Color.gold()
+    embed = discord.Embed(title=f"⚔️ RPG 冒險開始！", color=embed_color)
+    embed.set_thumbnail(url=avatar_url)
+    embed.add_field(name="等級", value="1", inline=True)
+    embed.add_field(name="經驗值", value="0%", inline=True)
+    embed.add_field(name="職業", value="無業游民", inline=True)
+    embed.add_field(name="魔力", value="100/100", inline=True)
+    embed.add_field(name="金錢", value=f"{user_balance} 幽靈幣", inline=True)
+    embed.add_field(name="防禦", value="0/20", inline=True)
+    embed.add_field(name="體力", value="20/20", inline=True)
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.slash_command(name="rpg-info", description="查看你的RPG冒險數據")
+async def rpg_info(interaction: discord.Interaction):
+    
+    guild_id = str(interaction.guild.id)
     user_id = str(interaction.user.id)
-    try:
-        with open(f'backpack/{user_id}.yml', 'r') as file:
-            backpack = yaml.safe_load(file)
-        
-        options = [SelectOption(label=item, description=f"数量: {backpack[item]['quantity']}") for item in backpack]
-        select = discord.ui.Select(placeholder="选择一个物品查看详情", options=options)
 
-        async def select_callback(interaction: discord.Interaction):
-            selected_item = select.values[0]
-            item_info = backpack[selected_item]
-            await interaction.response.send_message(f"你选择了: {selected_item}\n"
-                                                    f"数量: {item_info['quantity']}\n"
-                                                    f"描述: {item_info.get('description', '无描述')}")
-        
-        select.callback = select_callback
-        view = View()
-        view.add_item(select)
-
-        await interaction.response.send_message("请选择一个物品:", view=view)
-
-    except FileNotFoundError:
-        await interaction.response.send_message("你的背包是空的。")
-
-class ShopSelect(Select):
-    def __init__(self, shop_items):
-        options = [
-            discord.SelectOption(label="鐵匠鋪", description="武器和裝備"),
-            discord.SelectOption(label="魔法舖", description="魔法用品"),
-            discord.SelectOption(label="小吃舖", description="恢復物品")
-        ]
-        super().__init__(placeholder="選擇商店", options=options)
-        self.shop_items = shop_items
-
-    async def callback(self, interaction: discord.Interaction):
-        shop = self.values[0]
-        items = self.shop_items.get(shop, [])
-        
-        if not items:
-            await interaction.response.send_message(f"{shop}暂时没有商品", ephemeral=True)
-            return
-        
-        buttons = []
-        for item in items:
-            button = Button(label=f"{item['name']} - {item['price']} BTC", style=discord.ButtonStyle.primary)
-            button.callback = self.create_purchase_callback(item, interaction.user.id)
-            buttons.append(button)
-        
-        view = View()
-        for btn in buttons:
-            view.add_item(btn)
-        await interaction.response.send_message(f"你选择了 {shop}，以下是可购买的商品：", view=view)
-
-    def create_purchase_callback(self, item, user_id):
-        async def purchase_callback(interaction: discord.Interaction):
-            modal = PurchaseModal(item, user_id)
-            await interaction.response.send_modal(modal)
-        return purchase_callback
-
-class PurchaseModal(Modal):
-    def __init__(self, item, user_id):
-        super().__init__(title="购买物品")
-        self.item = item
-        self.user_id = user_id
-        self.add_item(TextInput(label="输入购买数量", placeholder="请输入数量", min_length=1, max_length=10))
-
-    async def on_submit(self, interaction: discord.Interaction):
-        quantity = int(self.children[0].value)
-        total_cost = quantity * self.item['price']
-
-        try:
-            with open('balance.yml', 'r') as balance_file:
-                balances = yaml.safe_load(balance_file)
-        except FileNotFoundError:
-            balances = {}
-
-        user_balance = balances.get(str(self.user_id), 0)
-
-        if user_balance < total_cost:
-            await interaction.response.send_message(f"你的幽灵币余额不足，无法购买 {quantity} 个 {self.item['name']}。")
-            return
-
-        balances[str(self.user_id)] = user_balance - total_cost
-
-        with open('balance.yml', 'w') as balance_file:
-            yaml.dump(balances, balance_file)
-
-        backpack_path = f'backpack/{self.user_id}.yml'
-        try:
-            with open(backpack_path, 'r') as backpack_file:
-                backpack = yaml.safe_load(backpack_file)
-        except FileNotFoundError:
-            backpack = {}
-
-        if self.item['name'] in backpack:
-            backpack[self.item['name']]['quantity'] += quantity
-        else:
-            backpack[self.item['name']] = {
-                'quantity': quantity,
-                'description': self.item.get('description', '无描述')
-            }
-
-        with open(backpack_path, 'w') as backpack_file:
-            yaml.dump(backpack, backpack_file)
-
-        await interaction.response.send_message(f"你购买了 {quantity} 个 {self.item['name']}，共花费 {total_cost} 幽灵币。物品已添加到你的背包。")
-
-@bot.tree.command(name="rpg_shop", description="前往商店")
-async def rpg_shop(interaction: discord.Interaction):
-    with open('shop_item.yml', 'r', encoding='utf-8') as file:
-        shop_items = yaml.safe_load(file)
+    balance_data = load_yaml("test-balance.yml")
+    user_balance = balance_data.get(guild_id, {}).get(user_id, 0)
+    rpg_data = load_json("rpg_config.json")
     
-    view = View()
-    view.add_item(ShopSelect(shop_items))
-    
-    await interaction.response.send_message("欢迎来到商店，请选择你要访问的店铺：", view=view)
-
-@bot.tree.command(name="rpg_adventure", description="开起冒险")
-async def rpg_adventure(interaction: discord.Interaction):
-    try:
-        with open('dungeon.yml', 'r') as dungeon_file:
-            dungeon_data = yaml.safe_load(dungeon_file)
-        with open('monster_item.yml', 'r') as monster_item_file:
-            monster_items = yaml.safe_load(monster_item_file)
-        with open('monster.yml', 'r') as monster_file:
-            monsters = yaml.safe_load(monster_file)
-        
-        await interaction.response.send_message("冒险开始！")
-    
-    except FileNotFoundError as e:
-        missing_file = str(e).split("'")[1]
-        
-        embed = discord.Embed(
-            title="錯誤: 文件丟失",
-            description=f"文件 `{missing_file}` 丟失，請聯繫作者以解決此問題。",
-            color=discord.Color.red()
+    if guild_id not in rpg_data or user_id not in rpg_data[guild_id]:
+        await interaction.response.send_message(
+            "⚠️ 你尚未開始冒險，請先使用 `/rpg-start`！",
+            ephemeral=True
         )
-        embed.add_field(name="GitHub", value="[點擊這裡聯繫作者](https://github.com/xuemeng1987)")
-        embed.set_footer(text="感謝您的理解！")
-
-        await interaction.response.send_message(embed=embed)
-
-class Battle:
-    def __init__(self, challenger_data, opponent_data):
-        self.challenger_data = challenger_data
-        self.opponent_data = opponent_data
-        self.turns = 30
-
-    def perform_attack(self, attacker, defender):
-        attack_value = random.randint(1, 10) * attacker['lv']
-        defender['hp'] -= attack_value
-        return attack_value
-
-    def is_over(self):
-        return self.challenger_data['hp'] <= 0 or self.opponent_data['hp'] <= 0 or self.turns == 0
-
-    def get_winner(self):
-        if self.challenger_data['hp'] > 0 and self.opponent_data['hp'] > 0:
-            return "平局"
-        if self.challenger_data['hp'] > 0:
-            return "挑战者"
-        return "对手"
-
-@bot.tree.command(name="rpg_playerbattle", description="与其他玩家决斗")
-async def rpg_playerbattle(interaction: discord.Interaction, opponent: discord.Member):
-    if interaction.user.id == opponent.id:
-        await interaction.response.send_message("你不能和自己决斗！")
         return
+    
+    user_rpg_data = rpg_data[guild_id][user_id]
+    
+    level = user_rpg_data.get("等級", 1)
+    exp = user_rpg_data.get("經驗值", 0)
+    exp_needed = user_rpg_data.get("升級需求", 100)
 
-    challenger_data_path = f'rpg-data/{interaction.user.id}.yml'
-    opponent_data_path = f'rpg-data/{opponent.id}.yml'
+    avatar_url = interaction.user.display_avatar.url
+    embed = discord.Embed(title=f"📜 你的RPG數據", color=discord.Color.blue())
+    embed.set_thumbnail(url=avatar_url)
+    
+    embed.add_field(name="🏅 等級", value=str(level), inline=True)
+    embed.add_field(name="📈 經驗值", value=f"{exp} / {exp_needed}%", inline=True)
+    embed.add_field(name="👤 職業", value=user_rpg_data.get("職業", "無業游民"), inline=True)
+    embed.add_field(name="🔮 魔力", value=user_rpg_data.get("魔力", "未知"), inline=True)
+    embed.add_field(name="🛡️ 防禦", value=user_rpg_data.get("防禦", "未知"), inline=True)
+    embed.add_field(name="❤️ 體力", value=user_rpg_data.get("體力", "未知"), inline=True)
+    embed.add_field(name="💰 金錢", value=f"{user_balance} 幽靈幣", inline=True)
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.slash_command(name="rpg-shop", description="打開 RPG 商店")
+async def rpg_shop(ctx: discord.ApplicationContext):
+    if ctx.user.id != AUTHOR_ID:
+        await ctx.respond("⚠️ 你無法使用該指令 目前還在測試中.", ephemeral=True)
+        return
+    await ctx.defer()
 
     try:
-        with open(challenger_data_path, 'r') as challenger_file:
-            challenger_data = yaml.safe_load(challenger_file)
-        with open(opponent_data_path, 'r') as opponent_file:
-            opponent_data = yaml.safe_load(opponent_file)
+        with open("rpg_shop_config.json", "r", encoding="utf-8") as f:
+            shop_data = json.load(f)
     except FileNotFoundError:
-        await interaction.response.send_message("无法找到玩家数据，请确保双方都已初始化角色。")
+        await ctx.respond("找不到商店配置文件！", ephemeral=True)
         return
 
-    battle = Battle(challenger_data, opponent_data)
-
-    for turn in range(battle.turns):
-        attack_value = battle.perform_attack(challenger_data, opponent_data)
-        if battle.is_over():
-            break
-        battle.perform_attack(opponent_data, challenger_data)
-        if battle.is_over():
-            break
-
-    winner = battle.get_winner()
-
-    await interaction.response.send_message(f"决斗结束！胜者是：{winner}")
-
-def get_item_prices():
-    try:
-        with open('monster_item_shell_price.yml', 'r', encoding='utf-8') as file:
-            item_prices = yaml.safe_load(file)
-        return item_prices
-    except Exception as e:
-        print(f"Error loading item prices: {e}")
-        return None
-
-@bot.tree.command(name="rpg_shell", description="出售怪物掉落物品")
-async def rpg_shell(interaction: discord.Interaction):
-    item_prices = get_item_prices()
-    
-    if not item_prices:
-        await interaction.response.send_message("无法加载物品价格数据。", ephemeral=True)
+    if not shop_data:
+        await ctx.respond("目前沒有商店！", ephemeral=True)
         return
 
-    options = [discord.SelectOption(label=item, description=f"价格: {price}") for item, price in item_prices.items()]
-    
-    select = discord.ui.Select(placeholder="选择要出售的物品", options=options)
-    
-    async def select_callback(select_interaction: discord.Interaction):
-        selected_item = select.values[0]
-        price = item_prices.get(selected_item, "未知价格")
-        
-        class ConfirmView(discord.ui.View):
-            @discord.ui.button(label="确认出售", style=discord.ButtonStyle.green)
-            async def confirm_button(self, button_interaction: discord.Interaction, button: discord.ui.Button):
-                user_id = str(interaction.user.id)
-                try:
-                    with open('balance.yml', 'r') as balance_file:
-                        balances = yaml.safe_load(balance_file)
-                except FileNotFoundError:
-                    balances = {}
-                
-                user_balance = balances.get(user_id, 0)
-                balances[user_id] = user_balance + price
-                
-                with open('balance.yml', 'w') as balance_file:
-                    yaml.safe_dump(balances, balance_file)
-                
-                backpack_path = f'backpack/{user_id}.yml'
-                try:
-                    with open(backpack_path, 'r') as backpack_file:
-                        backpack = yaml.safe_load(backpack_file)
-                except FileNotFoundError:
-                    backpack = {}
+    class ShopSelect(discord.ui.Select):
+        def __init__(self):
+            options = [discord.SelectOption(label=shop, value=shop) for shop in shop_data.keys()]
+            super().__init__(placeholder="選擇你要前往的商店", options=options)
 
-                if selected_item in backpack:
-                    backpack[selected_item]['quantity'] -= 1
-                    if backpack[selected_item]['quantity'] <= 0:
-                        del backpack[selected_item]
-                
-                with open(backpack_path, 'w') as backpack_file:
-                    yaml.safe_dump(backpack, backpack_file)
-                
-                await button_interaction.response.send_message(f"你成功出售了 **{selected_item}**，价格为 **{price}** 幽灵币。")
-        
-        view = ConfirmView()
-        await select_interaction.response.send_message(f"你选择了 **{selected_item}**，价格为 **{price}** 幽灵币。是否确认出售？", view=view)
-    
-    select.callback = select_callback
+        async def callback(self, interaction: discord.Interaction):
+            await show_shop(interaction, self.values[0])
+
+    async def show_shop(interaction: discord.Interaction, shop_name):
+        shop_items = shop_data.get(shop_name, {}).get("商品", [])
+        if not shop_items:
+            await interaction.response.send_message(f"{shop_name} 目前沒有商品！", ephemeral=True)
+            return
+
+        class ItemSelect(discord.ui.Select):
+            def __init__(self):
+                options = [discord.SelectOption(label=item["name"], value=item["name"]) for item in shop_items]
+                super().__init__(placeholder="選擇你要購買的商品", options=options)
+
+            async def callback(self, interaction: discord.Interaction):
+                await show_item_details(interaction, shop_name, self.values[0])
+
+        view = discord.ui.View()
+        view.add_item(ItemSelect())
+        await interaction.response.send_message(f"**{shop_name}**\n請選擇你要購買的商品：", view=view, ephemeral=True)
+
+    async def show_item_details(interaction: discord.Interaction, shop_name, item_name):
+        shop_items = shop_data.get(shop_name, {}).get("商品", [])
+        item = next((i for i in shop_items if i["name"] == item_name), None)
+
+        if not item:
+            await interaction.response.send_message("找不到該商品！", ephemeral=True)
+            return
+
+        item_price = item.get("price", 0)
+        item_attributes = "\n".join([f"**{key}:** {value}" for key, value in item.items() if key not in ["name", "price"]])
+
+        embed = discord.Embed(
+            title=f"商品資訊 - {item_name}",
+            description=f"**價格:** {item_price} 金幣\n{item_attributes}",
+            color=discord.Color.gold(),
+        )
+
+        class BuyButton(discord.ui.Button):
+            def __init__(self):
+                super().__init__(label="購買", style=discord.ButtonStyle.green)
+
+            async def callback(self, interaction: discord.Interaction):
+                await purchase_item(interaction, item_name, item_price, item)
+
+        view = discord.ui.View()
+        view.add_item(BuyButton())
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+    async def purchase_item(interaction: discord.Interaction, item_name, item_price, item):
+        try:
+            with open("test-balance.yml", "r", encoding="utf-8") as f:
+                balance_data = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            await interaction.response.send_message("找不到餘額文件！", ephemeral=True)
+            return
+
+        user_id = str(interaction.user.id)
+        guild_id = str(interaction.guild_id)
+        user_balance = balance_data.get(user_id, 0)
+
+        if user_balance < item_price:
+            await interaction.response.send_message(f"你的金幣不足，無法購買 {item_name}！", ephemeral=True)
+            return
+
+        balance_data[user_id] -= item_price
+        with open("test-balance.yml", "w", encoding="utf-8") as f:
+            yaml.safe_dump(balance_data, f)
+
+        try:
+            with open("rpg_player_backpack.json", "r", encoding="utf-8") as f:
+                backpack_data = json.load(f)
+        except FileNotFoundError:
+            backpack_data = {}
+
+        if guild_id not in backpack_data:
+            backpack_data[guild_id] = {}
+
+        if user_id not in backpack_data[guild_id]:
+            backpack_data[guild_id][user_id] = []
+
+        existing_item = next((i for i in backpack_data[guild_id][user_id] if i["name"] == item_name), None)
+        if existing_item:
+            existing_item["quantity"] = existing_item.get("quantity", 1) + 1
+        else:
+            item_copy = item.copy()
+            item_copy["quantity"] = 1  # 加入數量
+            backpack_data[guild_id][user_id].append(item_copy)
+
+        with open("rpg_player_backpack.json", "w", encoding="utf-8") as f:
+            json.dump(backpack_data, f, ensure_ascii=False, indent=4)
+
+        await interaction.response.send_message(f"成功購買 {item_name}！你的餘額剩餘 {balance_data[user_id]} 金幣。", ephemeral=True)
+
     view = discord.ui.View()
-    view.add_item(select)
-    
-    await interaction.response.send_message("请选择你想出售的物品：", view=view)
+    view.add_item(ShopSelect())
+    await ctx.respond("**商店大街**\n請選擇你要前往的商店：", view=view, ephemeral=True)
 
-class NPC:
-    def __init__(self, name):
-        self.name = name
+@bot.slash_command(name="rpg-backpack", description="查看你的 RPG 背包")
+async def rpg_backpack(ctx: discord.ApplicationContext):
+    if ctx.user.id != AUTHOR_ID:
+        await ctx.respond("⚠️ 你無法使用該指令，目前還在測試中.", ephemeral=True)
+        return
+    server_id = str(ctx.guild.id)
+    user_id = str(ctx.user.id)
 
-lei_yao = NPC
+    try:
+        with open("rpg_player_backpack.json", "r", encoding="utf-8") as f:
+            backpack_data = json.load(f)
+    except FileNotFoundError:
+        backpack_data = {}
 
-class LoanModal(discord.ui.Modal, title="貸款申請"):
-    amount = discord.ui.TextInput(label="請輸入想借的幽靈幣數量", placeholder="輸入數字", required=True)
+    server_backpack = backpack_data.get(server_id, {})
+    user_backpack = server_backpack.get(user_id, [])
 
-    def __init__(self):
-        super().__init__()
-
-    async def on_submit(self, interaction: discord.Interaction):
-        user_id = str(interaction.user.id)
-        try:
-            loan_amount = int(self.amount.value)
-            loan_date = datetime.now()
-            
-            try:
-                with open('loan.yml', 'r') as file:
-                    loans = yaml.safe_load(file) or {}
-            except FileNotFoundError:
-                loans = {}
-
-            loans[user_id] = {
-                'loan_amount': loan_amount,
-                'loan_date': loan_date.strftime('%Y-%m-%d %H:%M:%S')
-            }
-
-            with open('loan.yml', 'w') as file:
-                yaml.safe_dump(loans, file)
-
-            await interaction.response.send_message(f"雷燿說：你借了 {loan_amount} 幽靈幣，請記得按時還款哦！")
-
-        except ValueError:
-            await interaction.response.send_message("雷燿說：請輸入一個有效的數字！")
-
-class RepayLoanModal(discord.ui.Modal, title="還款"):
-    repayment_amount = discord.ui.TextInput(
-        label="請輸入還款金額", 
-        placeholder="輸入數字", 
-        required=True
-    )
-
-    def __init__(self):
-        super().__init__()
-
-    async def on_submit(self, interaction: discord.Interaction):
-        user_id = str(interaction.user.id)
-        try:
-            with open('loan.yml', 'r') as file:
-                loans = yaml.safe_load(file) or {}
-            
-            if user_id not in loans:
-                await interaction.response.send_message("雷燿說：你沒有貸款記錄！")
-                return
-            
-            loan_info = loans[user_id]
-            loan_amount = loan_info['loan_amount']
-            loan_date_str = loan_info['loan_date']
-            loan_date = datetime.strptime(loan_date_str, '%Y-%m-%d %H:%M:%S')
-
-            current_date = datetime.now()
-            days_passed = (current_date - loan_date).days
-
-            interest_rate_per_day = 0.01
-            total_repay_amount = loan_amount * (1 + interest_rate_per_day * days_passed)
-
-            with open('balance.yml', 'r') as file:
-                balances = yaml.safe_load(file) or {}
-
-            user_balance = balances.get(user_id, 0)
-
-            if user_balance >= total_repay_amount:
-                balances[user_id] = user_balance - total_repay_amount
-
-                with open('balance.yml', 'w') as file:
-                    yaml.safe_dump(balances, file)
-
-                del loans[user_id]
-                with open('loan.yml', 'w') as file:
-                    yaml.safe_dump(loans, file)
-
-                await interaction.response.send_message(f"雷燿說：你已成功還款 {total_repay_amount:.2f} 幽靈幣，謝謝你的信任！")
-
-            else:
-                await interaction.response.send_message(f"雷燿說：你的餘額不足以償還 {total_repay_amount:.2f} 幽靈幣！")
-
-        except FileNotFoundError:
-            await interaction.response.send_message("雷燿說：銀行資料未找到，無法完成還款。")
-        except Exception as e:
-            await interaction.response.send_message(f"雷燿說：發生錯誤：{str(e)}")
-
-class BankView(discord.ui.View):
-    def __init__(self):
-        super().__init__()
-
-    @discord.ui.button(label="查詢餘額", style=discord.ButtonStyle.green)
-    async def check_balance(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user_id = str(interaction.user.id)
-        
-        try:
-            with open('balance.yml', 'r') as file:
-                balances = yaml.safe_load(file) or {}
-
-            user_balance = balances.get(user_id, 0)
-            await interaction.response.send_message(f"雷燿告訴你：你的餘額為 {user_balance} 幽靈幣。")
-        
-        except FileNotFoundError:
-            await interaction.response.send_message("雷燿說：銀行資料未找到，無法查詢餘額。")
-
-    @discord.ui.button(label="貸款", style=discord.ButtonStyle.blurple)
-    async def loan(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(LoanModal())
-
-    @discord.ui.button(label="還款", style=discord.ButtonStyle.red)
-    async def repay_loan(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(RepayLoanModal())
-
-@bot.tree.command(name="rpg_bank", description="與雷燿互動，查詢餘額或貸款")
-async def rpg_bank(interaction: discord.Interaction):
-    view = BankView()
-    await interaction.response.send_message("雷燿問：你想查詢餘額、貸款還是還款？", view=view)
-
-@bot.tree.command(name="system_status", description="检查机器人的系统资源使用情况")
-async def system_status(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 你没有权限使用此命令。此命令仅限管理员使用。", ephemeral=True)
+    if not user_backpack:
+        await ctx.respond("你的背包是空的！", ephemeral=True)
         return
 
-    await interaction.response.defer()
-
-    cpu_percent = psutil.cpu_percent(interval=1)
-    memory_info = psutil.virtual_memory()
-    total_memory = memory_info.total / (1024 ** 3)
-    used_memory = memory_info.used / (1024 ** 3)
-    free_memory = memory_info.available / (1024 ** 3)
-
-    status_message = (
-        f"**🖥️ 系统资源使用情况：**\n"
-        f"```css\n"
-        f"CPU 使用率  : {cpu_percent}%\n"
-        f"总内存      : {total_memory:.2f} GB\n"
-        f"已用内存    : {used_memory:.2f} GB\n"
-        f"可用内存    : {free_memory:.2f} GB\n"
-        f"```\n"
-    )
-
-    await interaction.followup.send(status_message)
-
-@bot.tree.command(name="help_work", description="解析需求並返回生成的Python代碼")
-async def help_work(interaction: discord.Interaction, requirement: str):
-    """
-    處理 /help_work 命令，並將解析的代碼返回給用戶
-    :param interaction: discord.Interaction - 命令的上下文
-    :param requirement: str - 用戶輸入的需求
-    """
-    code = parse_requirement(requirement)
-    await interaction.response.send_message(f"根據你的需求生成的代碼是:\n```python\n{code}\n```")
-
-class OperationSelect(Select):
-    def __init__(self):
-        options = [
-            discord.SelectOption(label='加法', value='add', description='進行加法運算'),
-            discord.SelectOption(label='減法', value='subtract', description='進行減法運算'),
-            discord.SelectOption(label='乘法', value='multiply', description='進行乘法運算'),
-            discord.SelectOption(label='除法', value='divide', description='進行除法運算'),
-            discord.SelectOption(label='次方', value='power', description='進行指數運算'),
-            discord.SelectOption(label='平方根', value='sqrt', description='計算平方根'),
-            discord.SelectOption(label='對數', value='log', description='計算對數'),
-            discord.SelectOption(label='正弦', value='sin', description='計算正弦'),
-            discord.SelectOption(label='餘弦', value='cos', description='計算餘弦'),
-            discord.SelectOption(label='正切', value='tan', description='計算正切'),
-            discord.SelectOption(label='圓柱體積', value='cylinder_volume', description='計算圓柱體積'),
-            discord.SelectOption(label='圓面積', value='circle_area', description='計算圓的面積'),
-            discord.SelectOption(label='三角形面積', value='triangle_area', description='計算三角形面積'),
-            discord.SelectOption(label='球體積', value='sphere_volume', description='計算球的體積'),
-            discord.SelectOption(label='斜邊長度', value='hypotenuse', description='計算直角三角形的斜邊'),
-            discord.SelectOption(label='速度', value='speed', description='計算速度'),
-        ]
-        super().__init__(placeholder='選擇一個運算', options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(CalculatorModal(self.values[0]))
-
-def preprocess_input(value):
-    if value == '' or value is None:
-        return None
-
-    value = value.lower()
-
-    if "h" in value:  # 小時轉換為秒
-        value = value.replace("h", "")
-        return float(value) * 3600
+    backpack_items = "\n".join([f"**{item['name']}** x{item['quantity']}" for item in user_backpack])
     
-    if "m" in value:  # 分鐘轉換為秒
-        value = value.replace("m", "")
-        return float(value) * 60
-    
-    if "s" in value:  # 秒保持不變
-        value = value.replace("s", "")
-        return float(value)
-    
-    # 處理圓周率符號
-    value = value.replace("π", str(math.pi))
-    
-    # 處理長度單位，比如 cm 可以添加更多單位處理
-    value = value.replace("cm", "")  # 目前直接移除cm單位
-    return float(value)
+    embed = discord.Embed(title=f"{ctx.user.display_name} 的背包", description=backpack_items, color=discord.Color.blue())
+    await ctx.respond(embed=embed, ephemeral=True)
 
-class CalculatorModal(Modal):
-    def __init__(self, operation):
-        super().__init__(title="輸入數字")
-        self.operation = operation
+@bot.slash_command(name="rpg-mission", description="前往冒險者協會，選擇一個任務")
+async def rpg_mission(interaction: discord.Interaction):
+    mission_data = load_json("rpg-mission-config.json")
+    if not mission_data:
+        await interaction.response.send_message("⚠️ 目前沒有可選的任務！", ephemeral=True)
+        return
 
-        self.add_item(TextInput(label="數字 1", placeholder="輸入第一個數字", required=True))
-        
-        # 根據不同的操作，要求輸入第二個數字
-        if operation in ['add', 'subtract', 'multiply', 'divide', 'power', 'hypotenuse']:
-            self.add_item(TextInput(label="數字 2（可選）", placeholder="輸入第二個數字", required=False))
+    class MissionSelectView(View):
+        def __init__(self, user_id):
+            super().__init__(timeout=60)
+            self.user_id = user_id
 
-        # 特殊運算需要高度或底
-        if operation in ['cylinder_volume', 'triangle_area']:
-            self.add_item(TextInput(label="高度（可選）", placeholder="與高度相關的運算", required=False))
+            for mission_id, mission in mission_data.items():
+                button = Button(label=mission["mission name"], style=discord.ButtonStyle.primary)
+                button.callback = self.create_callback(mission_id, mission)
+                self.add_item(button)
 
-        if operation == 'triangle_area':
-            self.add_item(TextInput(label="底（可選）", placeholder="與底相關的運算", required=False))
-        
-        if operation == 'speed':
-            self.add_item(TextInput(label="時間", placeholder="輸入時間", required=True))
+        def create_callback(self, mission_id, mission):
+            async def callback(interaction: discord.Interaction):
+                if interaction.user.id != self.user_id:
+                    await interaction.response.send_message("⚠️ 這不是你的選單！", ephemeral=True)
+                    return
+                
+                guild_id = str(interaction.guild.id)
+                user_id = str(interaction.user.id)
+                rpg_data = load_json("rpg_config.json")
 
-    async def on_submit(self, interaction: discord.Interaction):
-        try:
-            num1 = preprocess_input(self.children[0].value)
-            num2 = preprocess_input(self.children[1].value if len(self.children) > 1 else None)
-            height = preprocess_input(self.children[2].value if len(self.children) > 2 else None)
-            base = preprocess_input(self.children[3].value if len(self.children) > 3 else None)
-            time = preprocess_input(self.children[4].value if len(self.children) > 4 else None)
+                if guild_id not in rpg_data:
+                    rpg_data[guild_id] = {}
+                if user_id not in rpg_data[guild_id]:
+                    await interaction.response.send_message("⚠️ 你還沒有開始 RPG！請先使用 `/rpg-start`。", ephemeral=True)
+                    return
 
-            result = calculator.perform_operation(self.operation, num1, num2, height, base, time)
-            await interaction.response.send_message(f'運算結果：{result}')
+                rpg_data[guild_id][user_id]["當前任務"] = {
+                    "id": mission_id,
+                    "name": mission["mission name"],
+                    "description": mission["mission description"],
+                    "rewards": {
+                        "exp": int(mission["reward 1"].replace("經驗值", "")),
+                        "gold": int(mission["reward 2"].replace("幽靈幣", ""))
+                    },
+                    "progress": mission["progress"]  # 存入初始進度
+                }
+                save_json("rpg_config.json", rpg_data)
 
-        except ValueError:
-            await interaction.response.send_message(f"輸入的數據無效，請檢查後再試！", ephemeral=True)
-        except Exception as e:
-            await interaction.response.send_message(f"發生錯誤：{str(e)}", ephemeral=True)
+                embed = discord.Embed(title="📜 任務已接取！", color=discord.Color.blue())
+                embed.add_field(name="任務內容", value=mission["mission name"], inline=False)
+                embed.add_field(name="描述", value=mission["mission description"], inline=False)
+                embed.add_field(name="進度", value=mission["progress"], inline=True)
+                embed.add_field(name="獎勵", value=f"💰 {mission['reward 2']}\n🎖️ {mission['reward 1']}", inline=True)
 
-class CalculatorView(View):
-    def __init__(self):
-        super().__init__()
-        self.add_item(OperationSelect())
+                await interaction.response.edit_message(embed=embed, view=None)
+            
+            return callback
 
-@bot.tree.command(name="calculate", description="進行高級數學運算")
-async def calculate(interaction: discord.Interaction):
-    await interaction.response.send_message("請選擇一個運算：", view=CalculatorView())
+    embed = discord.Embed(title="🏛️ 冒險者協會", description="請選擇你要接取的任務：", color=discord.Color.gold())
+    view = MissionSelectView(interaction.user.id)
 
-@bot.tree.command(name="create_event", description="創建一個新的事件")
-@app_commands.describe(event_name="事件名稱", event_date="事件日期 (YYYY-MM-DD)", event_time="事件時間 (HH:MM)", reminder_time="提醒時間 (分鐘)", description="事件描述")
-async def create_event(interaction: discord.Interaction, event_name: str, event_date: str, event_time: str, reminder_time: int = 10, description: str = ""):
+    await interaction.response.send_message(embed=embed, view=view)
+
+@bot.slash_command(name="rpg-complete", description="完成當前 RPG 任務")
+async def rpg_complete(interaction: discord.Interaction):
+    guild_id = str(interaction.guild.id)
+    user_id = str(interaction.user.id)
+
+    rpg_data = load_json("rpg_config.json")
+    balance_data = load_json("test-balance.yml")
+
+    if guild_id not in rpg_data or user_id not in rpg_data[guild_id]:
+        await interaction.response.send_message("⚠️ 你還沒有開始 RPG！請先使用 `/rpg-start`。", ephemeral=True)
+        return
+
+    user_data = rpg_data[guild_id][user_id]
+    mission = user_data.get("當前任務")
+
+    if not mission:
+        await interaction.response.send_message("⚠️ 你沒有進行中的任務，請先使用 `/rpg-mission`！", ephemeral=True)
+        return
+
+    current_progress, max_progress = map(int, mission["progress"].split("/"))
+
+    if current_progress < max_progress:
+        await interaction.response.send_message(
+            f"⚠️ 你的任務尚未完成！({current_progress}/{max_progress})",
+            ephemeral=True
+        )
+        return
+
+    exp_reward = mission["rewards"]["exp"]
+    gold_reward = mission["rewards"]["gold"]
+
+    user_data["經驗值"] += exp_reward
+    balance_data.setdefault(guild_id, {}).setdefault(user_id, 0)
+    balance_data[guild_id][user_id] += gold_reward
+
+    leveled_up = False
+    while user_data["經驗值"] >= user_data["升級需求"]:
+        user_data["經驗值"] -= user_data["升級需求"]
+        user_data["等級"] += 1
+        user_data["升級需求"] = int(user_data["升級需求"] * 1.1)
+        leveled_up = True
+
+    user_data["當前任務"] = None
+
+    save_json("rpg_config.json", rpg_data)
+    save_json("test-balance.yml", balance_data)
+
+    embed = discord.Embed(title="🎉 任務完成！", color=discord.Color.green())
+    embed.add_field(name="獲得獎勵", value=f"💰 {gold_reward} 幽靈幣\n🎖️ {exp_reward} 經驗", inline=True)
+    embed.add_field(name="當前等級", value=str(user_data["等級"]), inline=True)
+    embed.add_field(name="經驗值", value=f"{user_data['經驗值']} / {user_data['升級需求']}", inline=True)
+
+    if leveled_up:
+        embed.description = "🎊 恭喜你升級了！"
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.slash_command(name="rpg-adventure", description="展開一次冒險，探索未知的世界！")
+async def rpg_adventure(interaction: discord.Interaction):
+    guild_id = str(interaction.guild.id)
+    user_id = str(interaction.user.id)
+
+    rpg_data = load_json("rpg_config.json")
+    events_data = load_json("rpg_events.json")  # 存放隨機事件的 JSON
+    balance_data = load_json("test-balance.yml")
+    backpack_data = load_json("rpg_player_backpack.json")  # 玩家背包數據
+
+    # 確保玩家數據存在
+    if guild_id not in rpg_data or user_id not in rpg_data[guild_id]:
+        await interaction.response.send_message(
+            f"🤖 **{bot.user.name}**: 您好，我找不到您的初始化數據。\n"
+            f"請使用 `/rpg-start` 來初始化您的數據，這樣您才能開始您的第一次冒險！",
+            ephemeral=True
+        )
+        return
+
+    user_data = rpg_data[guild_id][user_id]
+
+    # 確保玩家有足夠體力
+    if user_data.get("體力", 0) <= 0:
+        await interaction.response.send_message("⚠️ 你已經沒有體力了，請稍後再來！", ephemeral=True)
+        return
+
+    # 扣除一次體力
+    user_data["體力"] -= 1
+
+    # 隨機選擇一個事件
+    event = random.choice(events_data["地表冒險"])
+
+    # 建立回應的嵌入訊息
+    embed = discord.Embed(title="🌍 你的冒險結果", description=event["event description"], color=discord.Color.green())
+    embed.add_field(name="事件", value=event["event name"], inline=False)
+
+    # 檢查是否為戰鬥事件
+    if event["event battle"]:
+        monster = event["monster"]
+        embed.add_field(name="🆚 遭遇怪物", value=f"**{monster['monster name']}**", inline=False)
+        embed.add_field(name="❤️ HP", value=str(monster["monster hp"]), inline=True)
+        embed.add_field(name="⚔️ 攻擊", value=str(monster["monster attack"]), inline=True)
+        embed.add_field(name="🛡️ 防禦", value=str(monster["monster defence"]), inline=True)
+
+        # 簡單模擬戰鬥結果（未來可以改進）
+        player_attack = user_data["攻擊力"]
+        monster_hp = int(monster["monster hp"])
+        while monster_hp > 0:
+            monster_hp -= max(1, player_attack - int(monster["monster defence"]))
+
+        # 獲勝後獎勵
+        exp_reward = int(event["reward 1"].replace("經驗值", "").strip())
+        gold_reward = int(event["reward 2"].replace("幽靈幣", "").strip())
+
+        user_data["經驗值"] += exp_reward
+        balance_data.setdefault(guild_id, {}).setdefault(user_id, 0)
+        balance_data[guild_id][user_id] += gold_reward
+
+        embed.add_field(name="🏆 獎勵", value=f"🎖️ {exp_reward} 經驗\n💰 {gold_reward} 幽靈幣", inline=False)
+    else:
+        # 非戰鬥事件（如寶箱）
+        gold_reward = int(event["reward 1"].replace("幽靈幣", "").strip())
+        item_reward = event["item"]
+
+        balance_data.setdefault(guild_id, {}).setdefault(user_id, 0)
+        balance_data[guild_id][user_id] += gold_reward
+
+        # 更新玩家背包數據
+        if guild_id not in backpack_data:
+            backpack_data[guild_id] = {}
+        if user_id not in backpack_data[guild_id]:
+            backpack_data[guild_id][user_id] = {}
+
+        item_name = item_reward["item name"]
+        item_amount = int(item_reward["item amount"])
+
+        # 如果物品已經存在，則增加數量
+        if item_name in backpack_data[guild_id][user_id]:
+            backpack_data[guild_id][user_id][item_name] += item_amount
+        else:
+            backpack_data[guild_id][user_id][item_name] = item_amount
+
+        embed.add_field(name="📦 你發現了寶箱！", value=f"💰 {gold_reward} 幽靈幣\n🎁 {item_name} x{item_amount}", inline=False)
+
+    # 儲存更新後的數據
+    save_json("rpg_config.json", rpg_data)
+    save_json("test-balance.yml", balance_data)
+    save_json("rpg_player_backpack.json", backpack_data)
+
+    # 發送冒險結果
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.slash_command(name="balance", description="查询用户余额")
+async def balance(ctx: discord.ApplicationContext):
     try:
-        event_date_time = datetime.datetime.strptime(f"{event_date} {event_time}", "%Y-%m-%d %H:%M")
-        user_id = interaction.user.id
-        new_event = CalendarEvent(event_name, event_date_time, user_id, description, reminder_time)
-        add_event(new_event)
-        await interaction.response.send_message(f"事件 `{event_name}` 已創建，將在 {event_date_time} 開始！")
-    except ValueError:
-        await interaction.response.send_message("日期或時間格式不正確，請使用 `YYYY-MM-DD` 和 `HH:MM` 格式。")
+        user_balance = load_yaml("test-balance.yml")
+        guild_id = str(ctx.guild.id)
+        user_id = str(ctx.user.id)
 
-@bot.tree.command(name="delete_event", description="刪除一個已創建的事件")
-@app_commands.describe(event_name="事件名稱")
-async def delete_event(interaction: discord.Interaction, event_name: str):
-    user_id = interaction.user.id
-    remove_event(event_name, user_id)
-    await interaction.response.send_message(f"事件 `{event_name}` 已刪除。")
+        if guild_id not in user_balance:
+            user_balance[guild_id] = {}
 
-@bot.tree.command(name="list_events", description="列出所有已創建的事件")
-async def list_events(interaction: discord.Interaction):
-    user_id = interaction.user.id
-    user_events = get_user_events(user_id)
-    if user_events:
-        events_details = "\n".join([f"{event.event_name}: {event.event_date_time} (提醒: {event.reminder_time} 分鐘前)" for event in user_events])
-        await interaction.response.send_message(f"您的事件:\n{events_details}")
-    else:
-        await interaction.response.send_message("您目前沒有設置任何事件。")
+        balance = user_balance[guild_id].get(user_id, 0)
 
-@bot.tree.command(name="draw_lots", description="抽取御神抽籤")
-async def draw_lots_command(interaction: discord.Interaction):
-    cooldown_file = "cooldowns.json"
-    cooldown_hours = 5
-    user_id = interaction.user.id
-    
-    on_cooldown, remaining_time = is_on_cooldown(user_id, cooldown_file, cooldown_hours)
-    
-    if on_cooldown:
-        await interaction.response.send_message(f"你還在冷卻中，剩餘時間：{remaining_time}", ephemeral=True)
-    else:
-        await interaction.response.defer()
-        result = draw_lots()
-        await interaction.followup.send(f"你抽出的御神籤的結果是:\n{result}")
-        update_cooldown(user_id, cooldown_file)
+        embed = discord.Embed(
+            title="💰 幽靈幣餘額查詢",
+            description=(
+                f"**{ctx.user.display_name}** 在此群组的幽靈幣餘額为：\n\n"
+                f"**{balance} 幽靈幣**"
+            ),
+            color=discord.Color.from_rgb(219, 112, 147)
+        )
+        embed.set_footer(text="感谢使用幽靈幣系統！")
 
-bot.run(TOKEN)
+        await ctx.respond(embed=embed)
+
+    except Exception as e:
+        logging.error(f"Unexpected error in balance command: {e}")
+        await ctx.respond(f"發生錯誤：{e}", ephemeral=True)
+
+try:
+    bot.run(TOKEN, reconnect=True)
+except discord.LoginFailure:
+    print("無效的機器人令牌。請檢查 TOKEN。")
+except Exception as e:
+    print(f"機器人啟動時發生錯誤: {e}")
