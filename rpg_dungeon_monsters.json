@@ -1,0 +1,74 @@
+{
+    "地下城怪物": [
+        {
+            "monster name": "哥布林",
+            "monster level": 1,
+            "monster exp": 10
+        },
+        {
+            "monster name": "菁英哥布林",
+            "monster level": 3,
+            "monster exp": 30
+        },
+        {
+            "monster name": "國王哥布林",
+            "monster level": 5,
+            "monster exp": 50
+        },
+        {
+            "monster name": "龍",
+            "monster level": 10,
+            "monster exp": 100
+        },
+        {
+            "monster name": "地獄龍",
+            "monster level": 15,
+            "monster exp": 150
+        },
+        {
+            "monster name": "菁英龍",
+            "monster level": 20,
+            "monster exp": 200
+        },
+        {
+            "monster name": "菁英地獄龍",
+            "monster level": 25,
+            "monster exp": 250
+        },
+        {
+            "monster name": "狼",
+            "monster level": 1,
+            "monster exp": 10
+        },
+        {
+            "monster name": "地獄狼",
+            "monster level": 3,
+            "monster exp": 30
+        },
+        {
+            "monster name": "菁英狼",
+            "monster level": 5,
+            "monster exp": 50
+        },
+        {
+            "monster name": "菁英地獄狼",
+            "monster level": 7,
+            "monster exp": 70
+        },
+        {
+            "monster name": "史萊姆",
+            "monster level": 1,
+            "monster exp": 5
+        },
+        {
+            "monster name": "菁英史萊姆",
+            "monster level": 3,
+            "monster exp": 15
+        },
+        {
+            "monster name": "魔王史萊姆",
+            "monster level": 10,
+            "monster exp": 100
+        }
+    ]
+}
