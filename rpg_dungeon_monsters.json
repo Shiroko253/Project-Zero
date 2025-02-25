@@ -1,74 +1,227 @@
 {
-    "地下城怪物": [
+    "dungeon_monsters": [
         {
-            "monster name": "哥布林",
-            "monster level": 1,
-            "monster exp": 10
+            "monster_name": "Goblin",
+            "monster_level": 1,
+            "monster_exp": 10,
+            "monster_items": [
+                {
+                    "item_name": "Goblin Dagger",
+                    "rarity": "Common",
+                    "drop_rate": 100
+                },
+                {
+                    "item_name": "Goblin Shield",
+                    "rarity": "Common",
+                    "drop_rate": 100
+                }
+            ]
         },
         {
-            "monster name": "菁英哥布林",
-            "monster level": 3,
-            "monster exp": 30
+            "monster_name": "Elite Goblin",
+            "monster_level": 3,
+            "monster_exp": 30,
+            "monster_items": [
+                {
+                    "item_name": "Elite Goblin Dagger",
+                    "rarity": "Rare",
+                    "drop_rate": 7.21
+                },
+                {
+                    "item_name": "Elite Goblin Shield",
+                    "rarity": "Rare",
+                    "drop_rate": 12
+                }
+            ]
         },
         {
-            "monster name": "國王哥布林",
-            "monster level": 5,
-            "monster exp": 50
+            "monster_name": "Goblin King",
+            "monster_level": 5,
+            "monster_exp": 50,
+            "monster_items": [
+                {
+                    "item_name": "Goblin King's Crown",
+                    "rarity": "Epic",
+                    "drop_rate": 2.2
+                },
+                {
+                    "item_name": "Goblin King's Scepter",
+                    "rarity": "Epic",
+                    "drop_rate": 1.3
+                }
+            ]
         },
         {
-            "monster name": "龍",
-            "monster level": 10,
-            "monster exp": 100
+            "monster_name": "Dragon",
+            "monster_level": 10,
+            "monster_exp": 100,
+            "monster_items": [
+                {
+                    "item_name": "Dragon Scale",
+                    "rarity": "Common",
+                    "drop_rate": 10
+                },
+                {
+                    "item_name": "Dragon Claw",
+                    "rarity": "Common",
+                    "drop_rate": 13
+                }
+            ]
         },
         {
-            "monster name": "地獄龍",
-            "monster level": 15,
-            "monster exp": 150
+            "monster_name": "Hell Dragon",
+            "monster_level": 15,
+            "monster_exp": 150,
+            "monster_items": [
+                {
+                    "item_name": "Hell Dragon Scale",
+                    "rarity": "Rare",
+                    "drop_rate": 57
+                },
+                {
+                    "item_name": "Hell Dragon Claw",
+                    "rarity": "Rare",
+                    "drop_rate": 52
+                }
+            ]
         },
         {
-            "monster name": "菁英龍",
-            "monster level": 20,
-            "monster exp": 200
+            "monster_name": "Elite Dragon",
+            "monster_level": 20,
+            "monster_exp": 200,
+            "monster_items": [
+                {
+                    "item_name": "Elite Dragon Scale",
+                    "rarity": "Epic",
+                    "drop_rate": 15
+                },
+                {
+                    "item_name": "Elite Dragon Claw",
+                    "rarity": "Epic",
+                    "drop_rate": 20
+                }
+            ]
         },
         {
-            "monster name": "菁英地獄龍",
-            "monster level": 25,
-            "monster exp": 250
+            "monster_name": "Elite Hell Dragon",
+            "monster_level": 25,
+            "monster_exp": 250,
+            "monster_items": [
+                {
+                    "item_name": "Elite Hell Dragon Scale",
+                    "rarity": "Legendary",
+                    "drop_rate": 0.13
+                },
+                {
+                    "item_name": "Elite Hell Dragon Claw",
+                    "rarity": "Legendary",
+                    "drop_rate": 0.12
+                }
+            ]
         },
         {
-            "monster name": "狼",
-            "monster level": 1,
-            "monster exp": 10
+            "monster_name": "Wolf",
+            "monster_level": 1,
+            "monster_exp": 10,
+            "monster_items": [
+                {
+                    "item_name": "Wolf Fur",
+                    "rarity": "Common",
+                    "drop_rate": 100
+                },
+                {
+                    "item_name": "Wolf Fang",
+                    "rarity": "Common",
+                    "drop_rate": 100
+                }
+            ]
         },
         {
-            "monster name": "地獄狼",
-            "monster level": 3,
-            "monster exp": 30
+            "monster_name": "Hell Wolf",
+            "monster_level": 3,
+            "monster_exp": 30,
+            "monster_items": [
+                {
+                    "item_name": "Hell Wolf Fur",
+                    "rarity": "Rare",
+                    "drop_rate": 12.2
+                },
+                {
+                    "item_name": "Hell Wolf Fang",
+                    "rarity": "Rare",
+                    "drop_rate": 45.1
+                }
+            ]
         },
         {
-            "monster name": "菁英狼",
-            "monster level": 5,
-            "monster exp": 50
+            "monster_name": "Elite Wolf",
+            "monster_level": 5,
+            "monster_exp": 50,
+            "monster_items": [
+                {
+                    "item_name": "Elite Wolf Fur",
+                    "rarity": "Epic",
+                    "drop_rate": 22
+                },
+                {
+                    "item_name": "Elite Wolf Fang",
+                    "rarity": "Epic",
+                    "drop_rate": 32
+                }
+            ]
         },
         {
-            "monster name": "菁英地獄狼",
-            "monster level": 7,
-            "monster exp": 70
+            "monster_name": "Elite Hell Wolf",
+            "monster_level": 7,
+            "monster_exp": 70,
+            "monster_items": [
+                {
+                    "item_name": "Elite Hell Wolf Fur",
+                    "rarity": "Legendary",
+                    "drop_rate": 1
+                },
+                {
+                    "item_name": "Elite Hell Wolf Fang",
+                    "rarity": "Legendary",
+                    "drop_rate": 0.5
+                }
+            ]
         },
         {
-            "monster name": "史萊姆",
-            "monster level": 1,
-            "monster exp": 5
+            "monster_name": "Slime",
+            "monster_level": 1,
+            "monster_exp": 5,
+            "monster_items": [
+                {
+                    "item_name": "Slime Gel",
+                    "rarity": "Common",
+                    "drop_rate": 100
+                }
+            ]
         },
         {
-            "monster name": "菁英史萊姆",
-            "monster level": 3,
-            "monster exp": 15
+            "monster_name": "Elite Slime",
+            "monster_level": 3,
+            "monster_exp": 15,
+            "monster_items": [
+                {
+                    "item_name": "Elite Slime Gel",
+                    "rarity": "Rare",
+                    "drop_rate": 12.1
+                }
+            ]
         },
         {
-            "monster name": "魔王史萊姆",
-            "monster level": 10,
-            "monster exp": 100
+            "monster_name": "Slime Lord",
+            "monster_level": 10,
+            "monster_exp": 100,
+            "monster_items": [
+                {
+                    "item_name": "Slime Lord Gel",
+                    "rarity": "Epic",
+                    "drop_rate": 72.7
+                }
+            ]
         }
     ]
 }
