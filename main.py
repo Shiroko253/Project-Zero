@@ -163,6 +163,47 @@ async def write_balance_file(data):
     except Exception as e:
         logging.error(f"寫入 balance.json 失敗: {e}")
 
+STATUS_FILE = "bot_status.json"
+
+def load_status():
+    try:
+        with open(STATUS_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"disconnects": []}
+
+def save_status(data):
+    with open(STATUS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+
+@bot.event
+async def on_disconnect():
+    """當機器人斷線時記錄事件"""
+    data = load_status()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    data["disconnects"].append({
+        "event": "disconnect",
+        "timestamp": now
+    })
+
+    save_status(data)
+    print(f"[警告] 機器人於 {now} 斷線。")
+
+@bot.event
+async def on_resumed():
+    """當機器人重新連接時記錄事件"""
+    data = load_status()
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    data["disconnects"].append({
+        "event": "reconnect",
+        "timestamp": now
+    })
+
+    save_status(data)
+    print(f"[訊息] 機器人於 {now} 重新連接。")
+
 @bot.event
 async def on_message(message):
     global last_activity_time
@@ -627,10 +668,15 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     class BlackjackButtons(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=120)
+            self.double_down_used = False  # 追蹤雙倍下注是否被使用
+            self.hit_used = False  # 追蹤玩家是否抽過牌
 
         @discord.ui.button(label="抽牌 (Hit)", style=discord.ButtonStyle.primary)
         async def hit(self, button: discord.ui.Button, interaction: discord.Interaction):
             nonlocal player_cards
+            self.hit_used = True  # 玩家已抽牌，禁用雙倍下注
+            self.children[2].disabled = True  # 禁用雙倍下注按鈕
+            
             player_cards.append(draw_card())
             player_total = calculate_hand(player_cards)
 
@@ -650,62 +696,62 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
                 )
                 await interaction.response.edit_message(embed=embed, view=self)
 
-        @discord.ui.button(label="停牌 (Stand)", style=discord.ButtonStyle.danger)
-        async def stand(self, button: discord.ui.Button, interaction: discord.Interaction):
-            dealer_total = calculate_hand(dealer_cards)
-            while dealer_total < 17:
-                dealer_cards.append(draw_card())
-                dealer_total = calculate_hand(dealer_cards)
-
-            player_total = calculate_hand(player_cards)
-
-            if dealer_total > 21 or player_total > dealer_total:
-                reward = round(bet * 2, 2)
-                if player_job == "賭徒":
-                    reward += bet
-                    reward *= 2
-                balance[guild_id][user_id] += reward
-                save_json("balance.json", balance)
-                embed = discord.Embed(
-                    title="恭賀，你贏了！",
-                    description=f"莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
-                    color=discord.Color.gold()
-                )
-            else:
-                embed = discord.Embed(
-                    title="殘念，莊家贏了！",
-                    description=f"莊家的手牌: {dealer_cards}",
-                    color=discord.Color.from_rgb(204, 0, 51)
-                )
-            await interaction.response.edit_message(embed=embed, view=None)
-            self.stop()
-        
         @discord.ui.button(label="雙倍下注 (Double Down)", style=discord.ButtonStyle.success)
         async def double_down(self, button: discord.ui.Button, interaction: discord.Interaction):
-            nonlocal bet, player_cards
-            if len(player_cards) > 2:
-                await interaction.response.send_message("你只能在第一輪使用雙倍下注！", ephemeral=True)
+            nonlocal player_cards, bet
+
+            if self.hit_used:  # 防止玩家已經抽過牌還能雙倍下注
+                await interaction.response.send_message("你已經抽過牌，無法再進行雙倍下注！", ephemeral=True)
                 return
 
             if balance[guild_id][user_id] < bet:
-                await interaction.response.send_message("你的餘額不足以進行雙倍下注！", ephemeral=True)
+                await interaction.response.send_message("餘額不足，無法雙倍下注！", ephemeral=True)
                 return
 
-            balance[guild_id][user_id] -= bet
             bet *= 2
+            balance[guild_id][user_id] -= bet // 2
             save_json("balance.json", balance)
 
             player_cards.append(draw_card())
             player_total = calculate_hand(player_cards)
-            self.doubled = True  # 標記玩家使用了雙倍下注
 
-            embed = discord.Embed(
-                title="你選擇了雙倍下注！",
-                description=f"你的手牌: {player_cards}\n總點數: {player_total}\n現在強制進入莊家回合！",
-                color=discord.Color.green()
-            )
-            await interaction.response.edit_message(embed=embed, view=None)
-            await self.stand(button, interaction)
+            self.children[2].disabled = True
+            self.children[0].disabled = True
+            self.double_down_used = True
+
+            if player_total > 21:
+                embed = discord.Embed(
+                    title="殘念，你爆了！",
+                    description=f"你的手牌: {player_cards}\n點數總計: {player_total}",
+                    color=discord.Color.from_rgb(204, 0, 51)
+                )
+            else:
+                dealer_total = calculate_hand(dealer_cards)
+                while dealer_total < 17:
+                    dealer_cards.append(draw_card())
+                    dealer_total = calculate_hand(dealer_cards)
+
+                if dealer_total > 21 or player_total > dealer_total:
+                    reward = round(bet * 2, 2)
+                    if player_job == "賭徒":
+                        reward += bet
+                        reward *= 2
+                    balance[guild_id][user_id] += reward
+                    save_json("balance.json", balance)
+                    embed = discord.Embed(
+                        title="恭賀，你贏了！",
+                        description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
+                        color=discord.Color.gold()
+                    )
+                else:
+                    embed = discord.Embed(
+                        title="殘念，莊家贏了！",
+                        description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}",
+                        color=discord.Color.from_rgb(204, 0, 51)
+                    )
+
+            await interaction.response.edit_message(embed=embed, view=self if not self.double_down_used else None)
+            self.stop() if self.double_down_used else None
 
         @discord.ui.button(label="停牌 (Stand)", style=discord.ButtonStyle.danger)
         async def stand(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -715,7 +761,7 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
                 dealer_total = calculate_hand(dealer_cards)
 
             player_total = calculate_hand(player_cards)
-
+            
             if dealer_total > 21 or player_total > dealer_total:
                 reward = round(bet * 2, 2)
                 if player_job == "賭徒":
