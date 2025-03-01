@@ -15,6 +15,7 @@ import yaml
 import psutil
 from discord.ext import commands
 from discord.ui import View, Button, Select
+from discord import ui
 from discord import Interaction
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
@@ -22,7 +23,9 @@ from urllib.parse import urlencode
 from filelock import FileLock
 from omikuji import draw_lots
 from responses import food_responses, death_responses, life_death_responses, self_responses, friend_responses, maid_responses, mistress_responses, reimu_responses, get_random_response
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
+from status_updater import update_status
+from functools import wraps
 
 load_dotenv()
 
@@ -85,16 +88,19 @@ def save_json(file_name, data):
     """通用 JSON 文件保存函數"""
     with open(file_name, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4)
-        
-user_balance = load_yaml('balance.yml')
-config = load_json("config.json")
-user_data = load_yaml("config_user.yml")
-quiz_data = load_yaml('quiz.yml')
 
+config = load_json("config.json")
 raw_jobs = config.get("jobs", [])
 jobs_data = {job: details for item in raw_jobs for job, details in item.items()}
 fish_data = config.get("fish", {})
 shop_data = config.get("shop_item", {})
+user_data = load_yaml("config_user.yml")
+quiz_data = load_yaml('quiz.yml')
+dm_messages = load_json('dm_messages.json')
+questions = load_yaml('trivia_questions.yml', {}).get('questions', [])
+user_rod = load_yaml('user_rod.yml', {})
+user_balance = load_json('balance.json')
+invalid_bet_count = load_json("invalid_bet_count.json")
 
 if not jobs_data:
     print("警告: 職業數據 (jobs) 為空！請檢查 config.json 文件。")
@@ -102,10 +108,6 @@ if not fish_data:
     print("警告: 魚類數據 (fish) 為空！請檢查 config.json 文件。")
 if not shop_data:
     print("警告: 商店數據 (shop_item) 為空！請檢查 config.json 文件。")
-
-dm_messages = load_json('dm_messages.json')
-questions = load_yaml('trivia_questions.yml', {}).get('questions', [])
-user_rod = load_yaml('user_rod.yml', {})
 
 if not os.path.exists('user_rod.yml'):
     save_yaml('user_rod.yml', {})
@@ -115,6 +117,51 @@ def get_random_question():
 
 cooldowns = {}
 active_giveaways = {}
+
+BALANCE_FILE = "balance.json"
+
+def track_balance_json(command_func):
+    """裝飾器：監測所有涉及 balance.json 的讀取與寫入"""
+    @wraps(command_func)
+    async def wrapper(interaction: discord.Interaction, *args, **kwargs):
+        try:
+            logging.info(f"執行指令: {command_func.__name__} 來自 {interaction.user} ({interaction.user.id})")
+            
+            before_data = await read_balance_file()
+            logging.info(f"讀取 balance.json (指令前): {before_data}")
+
+            result = await command_func(interaction, *args, **kwargs)
+
+            after_data = await read_balance_file()
+            logging.info(f"讀取 balance.json (指令後): {after_data}")
+
+            if before_data and not after_data:
+                logging.error(f"❌ balance.json 可能被 {command_func.__name__} 清空！")
+
+            return result
+        except Exception as e:
+            logging.error(f"執行 {command_func.__name__} 時發生錯誤: {e}", exc_info=True)
+            raise e
+    return wrapper
+
+async def read_balance_file():
+    """異步讀取 balance.json"""
+    try:
+        async with aiofiles.open(BALANCE_FILE, 'r', encoding='utf-8') as file:
+            content = await file.read()
+            return json.loads(content) if content else {}
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        logging.error(f"讀取 balance.json 失敗: {e}")
+        return {}
+
+async def write_balance_file(data):
+    """異步寫入 balance.json"""
+    try:
+        async with aiofiles.open(BALANCE_FILE, 'w', encoding='utf-8') as file:
+            await file.write(json.dumps(data, indent=4, ensure_ascii=False))
+        logging.info("✅ balance.json 更新成功")
+    except Exception as e:
+        logging.error(f"寫入 balance.json 失敗: {e}")
 
 @bot.event
 async def on_message(message):
@@ -275,13 +322,13 @@ async def on_message(message):
     
     if message.content == "早安":
         if message.author.id == AUTHOR_ID:
-            await message.channel.send("早安 主人 今日的開發目標順利嗎")
+            await message.reply("早安 主人 今日的開發目標順利嗎")
         else:
             await message.reply("早上好 今天有什麽事情儘早完成喲", mention_author=False)
     
     if message.content == "午安":
         if message.author.id == AUTHOR_ID:
-            await message.channel.send("下午好呀 今天似乎沒有什麽事情可以做呢")
+            await message.reply("下午好呀 今天似乎沒有什麽事情可以做呢")
         else:
             await message.reply("中午好啊 看起來汝似乎無所事事的呢", mention_author=False)
     
@@ -289,7 +336,7 @@ async def on_message(message):
         current_time = datetime.now().strftime("%H:%M")
         
         if message.author.id == AUTHOR_ID:
-            await message.channel.send(f"你趕快去睡覺 現在已經是 {current_time} 了 別再熬夜了！")
+            await message.reply(f"你趕快去睡覺 現在已經是 {current_time} 了 別再熬夜了！")
         else:
             await message.reply(f"現在的時間是 {current_time} 汝還不就寢嗎？", mention_author=False)
     
@@ -328,7 +375,40 @@ async def on_message(message):
         await message.channel.send(f"汝 是否是想説 “我爲何知道的呢” 呵呵")
         await asyncio.sleep(3)
         await message.channel.send(f"那是我的主人告訴我滴喲~ 欸嘿~")
-    
+        
+    if '蘿莉？' in message.content:
+        await message.channel.send("蘿莉控？")
+        await asyncio.sleep(5)
+
+        if message.guild:
+            members = [member.id for member in message.guild.members if not member.bot]
+            if members:
+                random_user_id = random.choice(members)
+                await message.channel.send(f"您是說 {random_user_id} 這位用戶嗎")
+            else:
+                await message.channel.send("這個伺服器內沒有普通成員。")
+        else:
+            await message.channel.send("這個能力只能在伺服器內使用。")
+            
+    if message.content.startswith('幽幽子你也該去睡覺了'):
+        now = datetime.now()
+        current_hour = now.hour
+
+        if 21 <= current_hour or current_hour < 5:
+            if message.author.id == AUTHOR_ID:
+                await message.reply("知道了~ 你也是準備去睡了")
+                await asyncio.sleep(3)
+                await message.reply("晚安 我可愛的主人")
+                await asyncio.sleep(5)
+                await bot.close()
+            else:
+                await message.reply("你無權使用該能力")
+        else:
+            bot_name = bot.user.name
+            formatted_time = now.strftime("%H:%M")
+            await message.reply(f"現在的時間是 {formatted_time}，{bot_name} 還不困~")
+            return
+
     await bot.process_commands(message)
 
 @bot.event
@@ -340,8 +420,8 @@ async def on_ready():
 
     try:
         await bot.change_presence(
-            status=discord.Status.idle,
-            activity=discord.Activity(type=discord.ActivityType.playing, name='蔚藍檔案')
+            status=discord.Status.online,
+            activity=discord.Activity(type=discord.ActivityType.watching, name='Youtube')
         )
         print("已設置機器人的狀態。")
     except Exception as e:
@@ -358,6 +438,18 @@ async def on_ready():
 
     global last_activity_time
     last_activity_time = time.time()
+    
+    update_status(bot_online=True, server_count=len(bot.guilds), ping=bot.latency * 1000)
+
+@bot.event
+async def on_guild_join(guild):
+    print(f"➕ 新增伺服器: {guild.name} ({guild.id})")
+    update_status(bot_online=True, server_count=len(bot.guilds), ping=bot.latency * 1000)
+
+@bot.event
+async def on_guild_remove(guild):
+    print(f"➖ 退出伺服器: {guild.name} ({guild.id})")
+    update_status(bot_online=True, server_count=len(bot.guilds), ping=bot.latency * 1000)
 
 @bot.slash_command(name="invite", description="生成机器人的邀请链接")
 async def invite(ctx: discord.ApplicationContext):
@@ -431,6 +523,17 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     user_id = str(ctx.author.id)
     guild_id = str(ctx.guild.id)
 
+    def load_json(file):
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def save_json(file, data):
+        with open(file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
     def load_yaml(file):
         try:
             with open(file, "r", encoding="utf-8") as f:
@@ -438,16 +541,39 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
         except FileNotFoundError:
             return {}
 
-    def save_yaml(file, data):
-        with open(file, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, allow_unicode=True)
-
     config = load_yaml("config_user.yml")
-    balance = load_yaml("balance.yml")
+    balance = load_json("balance.json")
+    invalid_bet_count = load_json("invalid_bet_count.json")
 
-    player_job = config.get(user_id, {}).get("job", "")
+    # 防止輸入 0 或負數賭注，超過兩次刪除玩家資料
+    if bet <= 0:
+        invalid_bet_count.setdefault(guild_id, {}).setdefault(user_id, 0)
+        invalid_bet_count[guild_id][user_id] += 1
+        save_json("invalid_bet_count.json", invalid_bet_count)
 
+        if invalid_bet_count[guild_id][user_id] >= 2:
+            balance.get(guild_id, {}).pop(user_id, None)
+            save_json("balance.json", balance)
+            invalid_bet_count[guild_id].pop(user_id, None)
+            save_json("invalid_bet_count.json", invalid_bet_count)
+
+            await ctx.respond(embed=discord.Embed(
+                title="你的帳戶已被清空！",
+                description="由於多次嘗試以 0 或負數進行賭注，你的餘額已被清空！",
+                color=discord.Color.red()
+            ))
+            return
+
+        await ctx.respond(embed=discord.Embed(
+            title="無效的賭注！",
+            description="賭注金額必須大於 0！",
+            color=discord.Color.red()
+        ))
+        return
+
+    player_job = config.get(guild_id, {}).get(user_id, {}).get("job", "")
     user_balance = round(balance.get(guild_id, {}).get(user_id, 0), 2)
+
     if user_balance < bet:
         await ctx.respond(embed=discord.Embed(
             title="餘額不足！",
@@ -456,53 +582,16 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
         ))
         return
 
-    if bet > 100_000_000.00:
-        embed = discord.Embed(
-            title="高額賭注！",
-            description="你的賭注超過 100,000,000。你是否要購買保險？\n\n**保險金額為一半的賭注金額**，如果莊家有Blackjack，你將獲得2倍保險金額作為賠付。",
-            color=discord.Color.gold()
-        )
-        view = discord.ui.View()
-
-        class InsuranceButtons(discord.ui.View):
-            def __init__(self):
-                super().__init__(timeout=30)
-                self.insurance = False
-
-            @discord.ui.button(label="購買保險", style=discord.ButtonStyle.success)
-            async def buy_insurance(self, button: discord.ui.Button, interaction: discord.Interaction):
-                self.insurance = True
-                self.stop()
-
-            @discord.ui.button(label="放棄保險", style=discord.ButtonStyle.danger)
-            async def decline_insurance(self, button: discord.ui.Button, interaction: discord.Interaction):
-                self.insurance = False
-                self.stop()
-
-        view = InsuranceButtons()
-        await ctx.respond(embed=embed, view=view)
-        await view.wait()
-
-        insurance_bought = view.insurance
-    else:
-        insurance_bought = False
-
-    # 從餘額中扣除下注金額
     balance.setdefault(guild_id, {})[user_id] = round(user_balance - bet, 2)
-    save_yaml("balance.yml", balance)
+    save_json("balance.json", balance)
 
     def create_deck():
         return [2, 3, 4, 5, 6, 7, 8, 9, 10, "J", "Q", "K", "A"] * 4
 
-    deck = create_deck()
-    random.shuffle(deck)
-
     def draw_card():
-        """從洗好的牌堆抽一張牌"""
         return deck.pop()
 
     def calculate_hand(cards):
-        """計算手牌點數"""
         value = 0
         aces = 0
         for card in cards:
@@ -520,19 +609,11 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
 
         return value
 
+    deck = create_deck()
+    random.shuffle(deck)
+
     player_cards = [draw_card(), draw_card()]
     dealer_cards = [draw_card(), draw_card()]
-
-    if insurance_bought and calculate_hand(dealer_cards) == 21:
-        insurance_payout = round(bet / 2 * 2, 2)
-        balance[guild_id][user_id] += insurance_payout
-        save_yaml("balance.yml", balance)
-        await ctx.respond(embed=discord.Embed(
-            title="保險賠付成功！",
-            description=f"莊家的手牌是 {dealer_cards}，你獲得了保險賠付 {insurance_payout:.2f} 幽靈幣。",
-            color=discord.Color.gold()
-        ))
-        return
 
     embed = discord.Embed(
         title="21點遊戲開始！",
@@ -577,14 +658,71 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
                 dealer_total = calculate_hand(dealer_cards)
 
             player_total = calculate_hand(player_cards)
-            
+
             if dealer_total > 21 or player_total > dealer_total:
                 reward = round(bet * 2, 2)
                 if player_job == "賭徒":
                     reward += bet
                     reward *= 2
                 balance[guild_id][user_id] += reward
-                save_yaml("balance.yml", balance)
+                save_json("balance.json", balance)
+                embed = discord.Embed(
+                    title="恭賀，你贏了！",
+                    description=f"莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
+                    color=discord.Color.gold()
+                )
+            else:
+                embed = discord.Embed(
+                    title="殘念，莊家贏了！",
+                    description=f"莊家的手牌: {dealer_cards}",
+                    color=discord.Color.from_rgb(204, 0, 51)
+                )
+            await interaction.response.edit_message(embed=embed, view=None)
+            self.stop()
+        
+        @discord.ui.button(label="雙倍下注 (Double Down)", style=discord.ButtonStyle.success)
+        async def double_down(self, button: discord.ui.Button, interaction: discord.Interaction):
+            nonlocal bet, player_cards
+            if len(player_cards) > 2:
+                await interaction.response.send_message("你只能在第一輪使用雙倍下注！", ephemeral=True)
+                return
+
+            if balance[guild_id][user_id] < bet:
+                await interaction.response.send_message("你的餘額不足以進行雙倍下注！", ephemeral=True)
+                return
+
+            balance[guild_id][user_id] -= bet
+            bet *= 2
+            save_json("balance.json", balance)
+
+            player_cards.append(draw_card())
+            player_total = calculate_hand(player_cards)
+            self.doubled = True  # 標記玩家使用了雙倍下注
+
+            embed = discord.Embed(
+                title="你選擇了雙倍下注！",
+                description=f"你的手牌: {player_cards}\n總點數: {player_total}\n現在強制進入莊家回合！",
+                color=discord.Color.green()
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+            await self.stand(button, interaction)
+
+        @discord.ui.button(label="停牌 (Stand)", style=discord.ButtonStyle.danger)
+        async def stand(self, button: discord.ui.Button, interaction: discord.Interaction):
+            dealer_total = calculate_hand(dealer_cards)
+            while dealer_total < 17:
+                dealer_cards.append(draw_card())
+                dealer_total = calculate_hand(dealer_cards)
+
+            player_total = calculate_hand(player_cards)
+
+            if dealer_total > 21 or player_total > dealer_total:
+                reward = round(bet * 2, 2)
+                if player_job == "賭徒":
+                    reward += bet
+                    reward *= 2
+                balance[guild_id][user_id] += reward
+                save_json("balance.json", balance)
                 embed = discord.Embed(
                     title="恭賀，你贏了！",
                     description=f"莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
@@ -599,63 +737,13 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             await interaction.response.edit_message(embed=embed, view=None)
             self.stop()
 
-        @discord.ui.button(label="雙倍下注 (Double Down)", style=discord.ButtonStyle.success)
-        async def double_down(self, button: discord.ui.Button, interaction: discord.Interaction):
-            nonlocal player_cards
-            nonlocal bet
-            
-            if balance[guild_id][user_id] < bet:  # 確保玩家有足夠的錢翻倍
-                await interaction.response.send_message("餘額不足，無法雙倍下注！", ephemeral=True)
-                return
-
-            bet *= 2
-            bet = round(bet, 2)
-            balance[guild_id][user_id] -= bet // 2  # 立即扣除額外下注
-            save_yaml("balance.yml", balance)
-
-            player_cards.append(draw_card())
-            player_total = calculate_hand(player_cards)
-
-            if player_total > 21:
-                embed = discord.Embed(
-                    title="殘念，你爆了！",
-                    description=f"你的手牌: {player_cards}\n點數總計: {player_total}",
-                    color=discord.Color.from_rgb(204, 0, 51)
-                )
-            else:
-                dealer_total = calculate_hand(dealer_cards)
-                while dealer_total < 17:
-                    dealer_cards.append(draw_card())
-                    dealer_total = calculate_hand(dealer_cards)
-
-                if dealer_total > 21 or player_total > dealer_total:
-                    reward = round(bet * 2, 2)
-                    if player_job == "賭徒":
-                        reward += bet
-                        reward *= 2
-                    balance[guild_id][user_id] += reward
-                    save_yaml("balance.yml", balance)
-                    embed = discord.Embed(
-                        title="恭賀，你贏了！",
-                        description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
-                        color=discord.Color.gold()
-                    )
-                else:
-                    embed = discord.Embed(
-                        title="殘念，莊家贏了！",
-                        description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}",
-                        color=discord.Color.from_rgb(204, 0, 51)
-                    )
-            
-            await interaction.response.edit_message(embed=embed, view=None)
-            self.stop()
-
     await ctx.respond(embed=embed, view=BlackjackButtons())
 
 @bot.slash_command(name="balance", description="查询用户余额")
+@track_balance_json
 async def balance(ctx: discord.ApplicationContext):
     try:
-        user_balance = load_yaml("balance.yml")
+        user_balance = load_json("balance.json")
         guild_id = str(ctx.guild.id)
         user_id = str(ctx.user.id)
 
@@ -681,7 +769,9 @@ async def balance(ctx: discord.ApplicationContext):
         await ctx.respond(f"發生錯誤：{e}", ephemeral=True)
 
 @bot.slash_command(name="balance_top", description="查看幽靈幣排行榜")
+@track_balance_json
 async def balance_top(interaction: discord.Interaction):
+    """顯示伺服器內前 10 名擁有最多幽靈幣的用戶"""
     try:
         if not interaction.guild:
             await interaction.response.send_message("此命令只能在伺服器中使用。", ephemeral=True)
@@ -689,18 +779,7 @@ async def balance_top(interaction: discord.Interaction):
 
         await interaction.response.defer()
 
-        try:
-            with open('balance.yml', 'r', encoding='utf-8') as file:
-                balance_data = yaml.safe_load(file) or {}
-        except FileNotFoundError:
-            await interaction.followup.send("找不到 balance.yml 文件。", ephemeral=True)
-            logging.error("找不到 balance.yml 文件。")
-            return
-        except yaml.YAMLError as yaml_error:
-            await interaction.followup.send("讀取 balance.yml 時發生錯誤。", ephemeral=True)
-            logging.error(f"讀取 balance.yml 時發生錯誤: {yaml_error}")
-            return
-
+        balance_data = await read_balance_file()
         guild_id = str(interaction.guild.id)
         if guild_id not in balance_data or not balance_data[guild_id]:
             await interaction.followup.send("目前沒有排行榜數據。", ephemeral=True)
@@ -723,11 +802,11 @@ async def balance_top(interaction: discord.Interaction):
                 username = f"未知用戶（ID: {user_id}）"
             leaderboard.append(f"**#{index}** - {username}: {balance} 幽靈幣")
 
-        leaderboard_message = "\n".join(leaderboard)
+        leaderboard_message = "\n".join(leaderboard) if leaderboard else "排行榜數據為空。"
 
         embed = discord.Embed(
             title="🏆 幽靈幣排行榜 🏆",
-            description=leaderboard_message or "排行榜數據為空。",
+            description=leaderboard_message,
             color=discord.Color.from_rgb(255, 182, 193)
         )
         embed.set_footer(text="排行榜僅顯示前 10 名")
@@ -794,7 +873,7 @@ async def shop(ctx: discord.ApplicationContext):
                     await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
                     return
 
-                user_balance = load_yaml('balance.yml')
+                user_balance = load_json('balance.json')
                 user_balance.setdefault(guild_id, {})
                 user_balance[guild_id].setdefault(user_id, 0)
 
@@ -803,11 +882,11 @@ async def shop(ctx: discord.ApplicationContext):
                 if current_balance >= total_price:
                     user_balance[guild_id][user_id] -= total_price
 
-                    save_yaml('balance.yml', user_balance)
+                    save_json('balance.json', user_balance)
 
                     user_data = load_yaml('config_user.yml')
                     user_data.setdefault(guild_id, {})
-                    user_data[guild_id].setdefault(user_id, {"MP": 100})
+                    user_data[guild_id].setdefault(user_id, {"MP": 200})
 
                     user_data[guild_id][user_id]["MP"] = max(
                         0, user_data[guild_id][user_id]["MP"] - selected_item["MP"]
@@ -897,7 +976,7 @@ async def choose_job(ctx: discord.ApplicationContext):
             options = []
             for job, data in jobs_data.items():
                 if isinstance(data, dict) and "min" in data and "max" in data:
-                    if job == "IT程序員" and it_count >= 2:  # 針對 IT程序員 檢查當前群組是否已滿
+                    if job == "IT程序員" and it_count >= 2:
                         options.append(discord.SelectOption(
                             label=f"   {job}   ",
                             description=f"{data['min']}-{data['max']}幽靈幣 (已滿員)",
@@ -924,11 +1003,14 @@ async def choose_job(ctx: discord.ApplicationContext):
                 return
             
             chosen_job = self.values[0]
+            
             if "_disabled" in chosen_job:
                 await interaction.response.send_message("該職業已滿員，請選擇其他職業！", ephemeral=True)
                 return
+            
             if guild_id not in user_data:
                 user_data[guild_id] = {}
+                
             if user_id not in user_data[guild_id]:
                 user_data[guild_id][user_id] = {}
 
@@ -940,6 +1022,7 @@ async def choose_job(ctx: discord.ApplicationContext):
                 user_info["work_cooldown"] = work_cooldown
             else:
                 user_info["work_cooldown"] = None
+            
             save_yaml("config_user.yml", user_data)
 
             for child in self.view.children:
@@ -1028,14 +1111,17 @@ async def reset_job(ctx):
     await ctx.respond(embed=embed, view=ConfirmReset())
 
 @bot.slash_command(name="work", description="執行你的工作並賺取幽靈幣！")
+@track_balance_json
 async def work(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
 
-    user_data = load_yaml('config_user.yml')
-    user_balance = load_yaml('balance.yml')
-
+    user_data = load_yaml('config_user.yml') or {}
+    user_balance = load_json('balance.json') or {}
+    
     guild_id = str(interaction.guild.id)
     user_id = str(interaction.user.id)
+
+    user_balance.setdefault(guild_id, {})
 
     user_info = user_data.setdefault(guild_id, {}).setdefault(user_id, {})
     if not user_info.get("job"):
@@ -1044,7 +1130,7 @@ async def work(interaction: discord.Interaction):
         )
         return
 
-    job_name = user_info.get("job")
+    job_name = user_info["job"]
 
     if isinstance(jobs_data, list):
         jobs_dict = {job["name"]: job for job in jobs_data if "name" in job}
@@ -1054,7 +1140,7 @@ async def work(interaction: discord.Interaction):
     if job_name == "賭徒":
         embed = discord.Embed(
             title="工作系統",
-            description=("你選擇了刺激的道路，工作？ 哼~ 那對於我來説太枯燥了，賭博才是工作的樂趣！"),
+            description="你選擇了刺激的道路，工作？ 哼~ 那對於我來說太枯燥了，賭博才是工作的樂趣！",
             color=discord.Color.from_rgb(255, 0, 0)
         )
         await interaction.followup.send(embed=embed, ephemeral=False)
@@ -1068,6 +1154,7 @@ async def work(interaction: discord.Interaction):
         return
 
     user_info.setdefault("MP", 0)
+
     if user_info["MP"] >= 200:
         await interaction.followup.send(
             "你的心理壓力已達到最大值！請休息一下再繼續工作。", ephemeral=True
@@ -1089,21 +1176,29 @@ async def work(interaction: discord.Interaction):
         return
 
     reward = random.randint(job_rewards["min"], job_rewards["max"])
-    user_balance.setdefault(guild_id, {})[user_id] = user_balance[guild_id].get(user_id, 0) + reward
+
+    user_balance[guild_id].setdefault(user_id, 0)
+    
+    user_balance[guild_id][user_id] += reward
+
     user_info["work_cooldown"] = (now + timedelta(seconds=WORK_COOLDOWN_SECONDS)).isoformat()
 
     user_info["MP"] += 10
-    save_yaml("balance.yml", user_balance)
+
+    save_json("balance.json", user_balance)
     save_yaml("config_user.yml", user_data)
 
     embed = discord.Embed(
         title="工作成功！",
-        description=(f"{interaction.user.mention} 作為 **{job_name}** 賺取了 **{reward} 幽靈幣**！🎉\n"
-                     f"當前心理壓力（MP）：{user_info['MP']}/200"),
+        description=(
+            f"{interaction.user.mention} 作為 **{job_name}** "
+            f"賺取了 **{reward} 幽靈幣**！🎉\n"
+            f"當前心理壓力（MP）：{user_info['MP']}/200"
+        ),
         color=discord.Color.green()
     )
-
     embed.set_footer(text=f"職業: {job_name}")
+    
     await interaction.followup.send(embed=embed)
 
 def convert_decimal_to_float(data):
@@ -1130,11 +1225,12 @@ def convert_float_to_decimal(data):
     return data
 
 @bot.slash_command(name="pay", description="转账给其他用户")
+@track_balance_json
 async def pay(interaction: discord.Interaction, member: discord.Member, amount: str):
     try:
         await interaction.response.defer()
 
-        user_balance = load_yaml("balance.yml")
+        user_balance = load_json("balance.json")
         user_balance = convert_float_to_decimal(user_balance)
 
         guild_id = str(interaction.guild.id)
@@ -1152,13 +1248,12 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
             return
 
         try:
-            amount = Decimal(amount).quantize(Decimal("0.00"), rounding=ROUND_DOWN)
+            amount = Decimal(amount)
+            if amount <= 0:
+                raise ValueError
+            amount = amount.quantize(Decimal("0.00"), rounding=ROUND_DOWN)
         except:
-            await interaction.followup.send("❌ 转账金额格式无效，请输入有效的数字金额（例如：100 或 100.00）。", ephemeral=True)
-            return
-
-        if amount <= 0:
-            await interaction.followup.send("❌ 转账金额必须大于 0。", ephemeral=True)
+            await interaction.followup.send("❌ 转账金额格式无效，请输入有效的正数金额（例如：100 或 100.00）。", ephemeral=True)
             return
 
         current_balance = Decimal(user_balance[guild_id].get(user_id, 0))
@@ -1170,7 +1265,7 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
         user_balance[guild_id][recipient_id] = Decimal(user_balance[guild_id].get(recipient_id, 0)) + amount
 
         data_to_save = convert_decimal_to_float(user_balance)
-        save_yaml("balance.yml", data_to_save)
+        save_json("balance.json", data_to_save)
 
         embed = discord.Embed(
             title="💸 转账成功！",
@@ -1178,7 +1273,7 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
                          "🎉 感谢您的使用！"),
             color=discord.Color.green()
         )
-        embed.set_footer(text="如有問題 請在Github issues提交疑問")
+        embed.set_footer(text="如有問題 请在 Github issues 提交疑问")
 
         await interaction.followup.send(embed=embed)
         logging.info(f"转账成功: {interaction.user.id} -> {member.id} 金额: {amount:.2f}")
@@ -1188,12 +1283,13 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
         await interaction.followup.send("❌ 执行命令时发生错误，请稍后再试。", ephemeral=True)
 
 @bot.slash_command(name="addmoney", description="给用户增加幽靈幣（特定用户专用）")
+@track_balance_json
 async def addmoney(interaction: discord.Interaction, member: discord.Member, amount: int):
     if interaction.user.id != AUTHOR_ID:
         await interaction.response.send_message("❌ 您没有权限执行此操作。", ephemeral=True)
         return
 
-    user_balance = load_yaml("balance.yml")
+    user_balance = load_json("balance.json")
     guild_id = str(interaction.guild.id)
     recipient_id = str(member.id)
 
@@ -1209,7 +1305,7 @@ async def addmoney(interaction: discord.Interaction, member: discord.Member, amo
         return
 
     user_balance[guild_id][recipient_id] = user_balance[guild_id].get(recipient_id, 0) + amount
-    save_yaml("balance.yml", user_balance)
+    save_json("balance.json", user_balance)
 
     embed = discord.Embed(
         title="✨ 幽靈幣增加成功",
@@ -1221,12 +1317,13 @@ async def addmoney(interaction: discord.Interaction, member: discord.Member, amo
     await interaction.response.send_message(embed=embed)
 
 @bot.slash_command(name="removemoney", description="移除用户幽靈幣（特定用户专用）")
+@track_balance_json
 async def removemoney(interaction: discord.Interaction, member: discord.Member, amount: int):
     if interaction.user.id != AUTHOR_ID:
         await interaction.response.send_message("❌ 您没有权限执行此操作。", ephemeral=True)
         return
 
-    user_balance = load_yaml("balance.yml")
+    user_balance = load_json("balance.json")
     guild_id = str(interaction.guild.id)
     recipient_id = str(member.id)
 
@@ -1849,33 +1946,8 @@ async def untimeout(interaction: discord.Interaction, member: discord.Member):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.slash_command(name="system_status", description="检查机器人的系统资源使用情况")
-async def system_status(interaction: discord.Interaction):
-    if not interaction.user.guild_permissions.administrator:
-        await interaction.response.send_message("❌ 你没有权限使用此命令。此命令仅限管理员使用。", ephemeral=True)
-        return
-
-    await interaction.response.defer()
-
-    cpu_percent = psutil.cpu_percent(interval=1)
-    memory_info = psutil.virtual_memory()
-    total_memory = memory_info.total / (1024 ** 3)
-    used_memory = memory_info.used / (1024 ** 3)
-    free_memory = memory_info.available / (1024 ** 3)
-
-    status_message = (
-        f"**🖥️ 系统资源使用情况：**\n"
-        f"```css\n"
-        f"CPU 使用率  : {cpu_percent}%\n"
-        f"总内存      : {total_memory:.2f} GB\n"
-        f"已用内存    : {used_memory:.2f} GB\n"
-        f"可用内存    : {free_memory:.2f} GB\n"
-        f"```\n"
-    )
-
-    await interaction.followup.send(status_message)
-
 @bot.slash_command(name="fish_shop", description="釣魚商店")
+@track_balance_json
 async def fish_shop(ctx: discord.ApplicationContext):
     user_id = str(ctx.user.id)
     guild_id = str(ctx.guild.id)
@@ -1887,9 +1959,11 @@ async def fish_shop(ctx: discord.ApplicationContext):
         fishiback_data = {}
 
     try:
-        with open("balance.yml", "r", encoding="utf-8") as balance_file:
-            balance_data = yaml.safe_load(balance_file)
+        with open("balance.json", "r", encoding="utf-8") as balance_file:
+            balance_data = json.load(balance_file)
     except FileNotFoundError:
+        balance_data = {}
+    except json.JSONDecodeError:
         balance_data = {}
 
     user_fishes = fishiback_data.get(user_id, {}).get(guild_id, {}).get("fishes", [])
@@ -1990,10 +2064,10 @@ async def fish_shop(ctx: discord.ApplicationContext):
             rarity_prices = {
                 "common": (100, 10),
                 "uncommon": (350, 15),
-                "rare": (7340, 50),
-                "legendary": (32500, 100),
-                "deify": (195500, 500),
-                "unknown": (5237000, 1000)
+                "rare": (7400, 50),
+                "legendary": (450000, 100),
+                "deify": (3000000, 500),
+                "unknown": (100000000, 1000)
             }
             base_price, weight_multiplier = rarity_prices.get(fish["rarity"], (0, 0))
             price = base_price + fish["size"] * weight_multiplier
@@ -2005,8 +2079,8 @@ async def fish_shop(ctx: discord.ApplicationContext):
             with open("fishiback.yml", "w", encoding="utf-8") as fishiback_file:
                 yaml.safe_dump(fishiback_data, fishiback_file, allow_unicode=True)
 
-            with open("balance.yml", "w", encoding="utf-8") as balance_file:
-                yaml.safe_dump(balance_data, balance_file, allow_unicode=True)
+            with open("balance.json", "w", encoding="utf-8") as balance_file:
+                json.dump(balance_data, balance_file, ensure_ascii=False, indent=4)
 
             if not user_fishes:
                 await interaction.response.edit_message(
@@ -2021,6 +2095,15 @@ async def fish_shop(ctx: discord.ApplicationContext):
                 content=f"成功售出 {fish['name']}，獲得幽靈幣 {price}！",
                 embed=embed, view=sell_view
             )
+            
+        @discord.ui.button(label="取消", style=discord.ButtonStyle.red)
+        async def cancel_sell(self, button: discord.ui.Button, interaction: discord.Interaction):
+            sell_view = FishSellView()
+            embed = sell_view.get_updated_embed()
+            await interaction.response.edit_message(
+                content="已取消販售，請選擇其他漁獲。",
+                embed=embed, view=sell_view
+            )
 
     welcome_embed = discord.Embed(
         title="歡迎來到漁獲商店",
@@ -2033,13 +2116,20 @@ async def fish_shop(ctx: discord.ApplicationContext):
 
 @bot.slash_command(name="fish", description="進行一次釣魚")
 async def fish(ctx: discord.ApplicationContext):
-    with open("config.json", "r", encoding="utf-8") as config_file:
-        fish_data = json.load(config_file)["fish"]
+    try:
+        with open("config.json", "r", encoding="utf-8") as config_file:
+            fish_data = json.load(config_file)["fish"]
+    except FileNotFoundError:
+        await ctx.respond("配置文件 `config.json` 未找到！", ephemeral=True)
+        return
+    except KeyError:
+        await ctx.respond("配置文件 `config.json` 格式错误！", ephemeral=True)
+        return
 
     user_id = str(ctx.user.id)
     guild_id = str(ctx.guild.id)
 
-    current_rod = "測試員魚竿"
+    current_rod = "魚竿"
 
     def generate_fish_data():
         selected_fish = random.choice(fish_data)
@@ -2118,8 +2208,12 @@ async def fish(ctx: discord.ApplicationContext):
                 "rod": current_rod
             })
 
-            with open("fishiback.yml", "w", encoding="utf-8") as fishiback_file:
-                yaml.safe_dump(fishiback_data, fishiback_file, allow_unicode=True)
+            try:
+                with open("fishiback.yml", "w", encoding="utf-8") as fishiback_file:
+                    yaml.safe_dump(fishiback_data, fishiback_file, allow_unicode=True)
+            except Exception as e:
+                await interaction.response.send_message(f"保存渔获时出错：{e}", ephemeral=True)  # 增加异常处理
+                return
 
             button.disabled = True
             button.label = "已保存漁獲"
@@ -2308,6 +2402,16 @@ async def quiz(ctx: discord.ApplicationContext):
 
     await ctx.respond(embed=embed, view=QuizView())
 
+@bot.slash_command(name="rpg-start", description="初始化你的rpg數據")
+async def rpg_start(ctx: discord.ApplicationContext):
+    embed = discord.Embed(
+        title="RPG系統通知",
+        description="正在開發中，預計完成時間：未知。",
+        color=discord.Color.red()
+    )
+    embed.set_footer(text="很抱歉無法使用該指令")
+    await ctx.respond(embed=embed)
+
 @bot.slash_command(name="help", description="显示所有可用指令")
 async def help(ctx: discord.ApplicationContext):
     embed_test = discord.Embed(
@@ -2349,8 +2453,15 @@ async def help(ctx: discord.ApplicationContext):
         ),
         color=discord.Color.blue()
     )
+    embed_gambling = discord.Embed(
+        title="🎰 賭博指令",
+        description=(
+            "> `blackjack` - 開啓黑傑克21點賭博"
+        ),
+        color=discord.Color.from_rgb(204, 0, 51)
+    )
 
-    for embed in [embed_test, embed_economy, embed_admin, embed_common, embed_fishing]:
+    for embed in [embed_test, embed_economy, embed_admin, embed_common, embed_fishing, embed_gambling]:
         embed.set_footer(text="更多指令即將推出，敬請期待...")
 
     options = [
@@ -2359,6 +2470,7 @@ async def help(ctx: discord.ApplicationContext):
         discord.SelectOption(label="管理員指令", description="查看管理員指令", value="admin", emoji="🔒"),
         discord.SelectOption(label="釣魚指令", description="查看釣魚相關指令", value="fishing", emoji="🎣"),
         discord.SelectOption(label="測試員指令", description="查看測試員指令", value="test", emoji="⚠️"),
+        discord.SelectOption(label="賭博指令", description="查看賭博指令", value="gambling", emoji="🎰"),
     ]
 
     async def select_callback(interaction: discord.Interaction):
@@ -2368,7 +2480,8 @@ async def help(ctx: discord.ApplicationContext):
             "economy": embed_economy,
             "admin": embed_admin,
             "fishing": embed_fishing,
-            "test": embed_test
+            "test": embed_test,
+            "gambling": embed_gambling
         }
         selected_embed = embeds.get(selected_value, embed_common)
         await interaction.response.edit_message(embed=selected_embed)
