@@ -13,6 +13,9 @@ import aiofiles
 import re
 import yaml
 import psutil
+import requests
+import sqlite3
+import openai
 from discord.ext import commands
 from discord.ui import View, Button, Select
 from discord import ui
@@ -33,6 +36,11 @@ TOKEN = os.getenv('DISCORD_TOKEN_MAIN_BOT')
 AUTHOR_ID = int(os.getenv('AUTHOR_ID', 0))
 LOG_FILE_PATH = "feedback_log.txt"
 WORK_COOLDOWN_SECONDS = 230
+API_URL = 'https://api.chatanywhere.org/v1/'
+api_keys = [
+    {"key": os.getenv('CHATANYWHERE_API'), "limit": 200, "remaining": 200}
+]
+current_api_index = 0
 
 if not TOKEN or not AUTHOR_ID:
     raise ValueError("缺少必要的環境變量 DISCORD_TOKEN_MAIN_BOT 或 AUTHOR_ID")
@@ -163,46 +171,175 @@ async def write_balance_file(data):
     except Exception as e:
         logging.error(f"寫入 balance.json 失敗: {e}")
 
-STATUS_FILE = "bot_status.json"
+disconnect_count = 0
+last_disconnect_time = None
+MAX_DISCONNECTS = 3
+MAX_DOWN_TIME = 20  # 超過 20 秒就發送警報
+CHECK_INTERVAL = 3  # 每 3 秒檢查一次
+DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
 def load_status():
+    """讀取機器人的斷線記錄"""
     try:
-        with open(STATUS_FILE, "r", encoding="utf-8") as f:
+        with open("bot_status.json", "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"disconnects": []}
 
 def save_status(data):
-    with open(STATUS_FILE, "w", encoding="utf-8") as f:
+    """儲存機器人的斷線記錄"""
+    with open("bot_status.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
-@bot.event
-async def on_disconnect():
-    """當機器人斷線時記錄事件"""
-    data = load_status()
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    data["disconnects"].append({
-        "event": "disconnect",
-        "timestamp": now
-    })
+async def check_long_disconnect():
+    """監控機器人是否長時間無法重新連接"""
+    global last_disconnect_time
 
-    save_status(data)
-    print(f"[警告] 機器人於 {now} 斷線。")
+    while True:
+        if last_disconnect_time:
+            elapsed = (datetime.now() - last_disconnect_time).total_seconds()
+            if elapsed > MAX_DOWN_TIME:
+                send_alert(f"⚠️ 警告：機器人已斷線超過 {MAX_DOWN_TIME} 秒，可能是伺服器網絡問題！")
+                last_disconnect_time = None
+        await asyncio.sleep(CHECK_INTERVAL)  # 每 3 秒檢查一次
 
-@bot.event
-async def on_resumed():
-    """當機器人重新連接時記錄事件"""
-    data = load_status()
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    data["disconnects"].append({
-        "event": "reconnect",
-        "timestamp": now
-    })
+def send_alert(message):
+    """使用 Discord Webhook 發送警報"""
+    if not DISCORD_WEBHOOK_URL:
+        print("❌ [錯誤] 未設置 Webhook URL，無法發送警報。")
+        return
 
-    save_status(data)
-    print(f"[訊息] 機器人於 {now} 重新連接。")
+    data = {
+        "content": f"🚨 **警報通知** 🚨\n📢 {message}\n🕒 時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    }
+
+    try:
+        response = requests.post(DISCORD_WEBHOOK_URL, json=data)
+        if response.status_code == 204:
+            print("✅ [通知] 警報已發送到 Discord。")
+        else:
+            print(f"⚠️ [警告] Webhook 發送失敗，狀態碼: {response.status_code}, 回應: {response.text}")
+    except Exception as e:
+        print(f"❌ [錯誤] 無法發送 Webhook: {e}")
+
+def init_db():
+    conn = sqlite3.connect("example.db")
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS UserMessages 
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT, 
+                  user_id TEXT, 
+                  message TEXT, 
+                  repeat_count INTEGER DEFAULT 0, 
+                  is_permanent BOOLEAN DEFAULT FALSE,
+                  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)''')
+    c.execute('''CREATE TABLE IF NOT EXISTS BackgroundInfo 
+                 (user_id TEXT PRIMARY KEY, 
+                  info TEXT)''')
+    conn.commit()
+    conn.close()
+
+def record_message(user_id, message):
+    conn = sqlite3.connect("example.db")
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, repeat_count, is_permanent FROM UserMessages 
+        WHERE user_id = ? AND message = ? AND is_permanent = FALSE
+    """, (user_id, message))
+    row = c.fetchone()
+
+    if row:
+        new_count = row[1] + 1
+        c.execute("""
+            UPDATE UserMessages SET repeat_count = ? WHERE id = ?
+        """, (new_count, row[0]))
+        if new_count >= 10:
+            c.execute("""
+                UPDATE UserMessages SET is_permanent = TRUE WHERE id = ?
+            """, (row[0],))
+    else:
+        c.execute("""
+            INSERT INTO UserMessages (user_id, message) VALUES (?, ?)
+        """, (user_id, message))
+
+    conn.commit()
+    conn.close()
+
+def clean_old_messages():
+    conn = sqlite3.connect("example.db")
+    c = conn.cursor()
+    thirty_minutes_ago = datetime.now() - timedelta(minutes=30)
+    c.execute("""
+        DELETE FROM UserMessages 
+        WHERE created_at < ? AND is_permanent = FALSE
+    """, (thirty_minutes_ago,))
+    conn.commit()
+    conn.close()
+
+def summarize_context(context):
+    return context[:1500]
+
+def generate_response(prompt, user_id):
+    try:
+        openai.api_base = API_URL
+        openai.api_key = os.getenv('CHATANYWHERE_API')
+
+        conn = sqlite3.connect("example.db")
+        c = conn.cursor()
+        c.execute("""
+            SELECT message FROM UserMessages 
+            WHERE user_id = ? OR user_id = 'system'
+        """, (user_id,))
+        context = "\n".join([f"{user_id}說 {row[0]}" for row in c.fetchall()])
+        conn.close()
+
+        user_background_info = get_user_background_info("西行寺 幽幽子")
+        if not user_background_info:
+            updated_background_info = (
+                "我是西行寺幽幽子，白玉樓的主人，幽靈公主。"
+                "生前因擁有『操縱死亡的能力』，最終選擇自盡，被埋葬於西行妖之下，化為幽靈。"
+                "現在，我悠閒地管理著冥界，欣賞四季變換，品味美食，偶爾捉弄妖夢。"
+                "雖然我的話語總是輕飄飄的，但生與死的流轉，皆在我的掌握之中。"
+                "啊，還有，請不要吝嗇帶點好吃的來呢～"
+            )
+            conn = sqlite3.connect("example.db")
+            c = conn.cursor()
+            c.execute("""
+                INSERT INTO BackgroundInfo (user_id, info) VALUES (?, ?)
+            """, ("西行寺 幽幽子", updated_background_info))
+            conn.commit()
+            conn.close()
+        else:
+            updated_background_info = user_background_info
+
+        if len(context.split()) > 3000:
+            context = summarize_context(context)
+
+        messages = [
+            {"role": "system", "content": f"你現在是西行寺幽幽子，冥界的幽靈公主，背景資訊：{updated_background_info}"},
+            {"role": "user", "content": f"{user_id}說 {prompt}"},
+            {"role": "assistant", "content": f"已知背景資訊：\n{context}"}
+        ]
+
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=messages
+        )
+
+        return response['choices'][0]['message']['content'].strip()
+
+    except Exception as e:
+        print(f"API 發生錯誤: {str(e)}")
+        return "幽幽子現在有點懶洋洋的呢～等會兒再來吧♪"
+
+def get_user_background_info(user_id):
+    conn = sqlite3.connect("example.db")
+    c = conn.cursor()
+    c.execute("""
+        SELECT info FROM BackgroundInfo WHERE user_id = ?
+    """, (user_id,))
+    rows = c.fetchall()
+    conn.close()
+    return "\n".join([row[0] for row in rows]) if rows else None
 
 @bot.event
 async def on_message(message):
@@ -215,6 +352,29 @@ async def on_message(message):
         return
     
     content = message.content
+    
+    is_reply_to_bot = message.reference and message.reference.message_id
+    is_mentioning_bot = bot.user.mention in message.content
+
+    if is_reply_to_bot:
+        try:
+            referenced_message = await message.channel.fetch_message(message.reference.message_id)
+            if referenced_message.author == bot.user:
+                is_reply_to_bot = True
+            else:
+                is_reply_to_bot = False
+        except discord.NotFound:
+            is_reply_to_bot = False
+
+    if is_reply_to_bot or is_mentioning_bot:
+        user_message = message.content
+        user_id = str(message.author.id)
+
+        record_message(user_id, user_message)
+        clean_old_messages()
+
+        response = generate_response(user_message, user_id)
+        await message.channel.send(response)
     
     if '關於機器人幽幽子' in message.content.lower():
         await message.channel.send('幽幽子的創建時間是<t:1623245700:D>')
@@ -456,41 +616,59 @@ async def on_message(message):
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
     print("------")
-
     print("斜線指令已自動同步。")
-
     try:
         await bot.change_presence(
             status=discord.Status.online,
-            activity=discord.Activity(type=discord.ActivityType.watching, name='Youtube')
+            activity=discord.Activity(type=discord.ActivityType.playing, name='正在和主人貼貼')
         )
         print("已設置機器人的狀態。")
     except Exception as e:
         print(f"Failed to set presence: {e}")
-    
     end_time = time.time()
     startup_time = end_time - start_time
-    
     print(f'Bot startup time: {startup_time:.2f} seconds')
-    
     print('加入的伺服器列表：')
     for guild in bot.guilds:
         print(f'- {guild.name} (ID: {guild.id})')
-
     global last_activity_time
     last_activity_time = time.time()
-    
     update_status(bot_online=True, server_count=len(bot.guilds), ping=bot.latency * 1000)
+    bot.loop.create_task(check_long_disconnect())
+    init_db()
 
 @bot.event
-async def on_guild_join(guild):
-    print(f"➕ 新增伺服器: {guild.name} ({guild.id})")
-    update_status(bot_online=True, server_count=len(bot.guilds), ping=bot.latency * 1000)
+async def on_disconnect():
+    """當機器人斷線時記錄事件"""
+    global disconnect_count, last_disconnect_time
+
+    disconnect_count += 1
+    last_disconnect_time = datetime.now()
+    now_str = last_disconnect_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    data = load_status()
+    data["disconnects"].append({"event": "disconnect", "timestamp": now_str})
+    save_status(data)
+
+    print(f"[警告] 機器人於 {now_str} 斷線。（第 {disconnect_count} 次）")
+
+    if disconnect_count >= MAX_DISCONNECTS:
+        send_alert(f"⚠️ 機器人短時間內已斷線 {disconnect_count} 次！")
 
 @bot.event
-async def on_guild_remove(guild):
-    print(f"➖ 退出伺服器: {guild.name} ({guild.id})")
-    update_status(bot_online=True, server_count=len(bot.guilds), ping=bot.latency * 1000)
+async def on_resumed():
+    """當機器人重新連接時記錄事件"""
+    global disconnect_count, last_disconnect_time
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    data = load_status()
+    data["disconnects"].append({"event": "reconnect", "timestamp": now_str})
+    save_status(data)
+
+    print(f"[訊息] 機器人於 {now_str} 重新連接。")
+
+    disconnect_count = 0
+    last_disconnect_time = None
 
 @bot.slash_command(name="invite", description="生成机器人的邀请链接")
 async def invite(ctx: discord.ApplicationContext):
@@ -560,7 +738,7 @@ async def about_me(ctx: discord.ApplicationContext):
 @bot.slash_command(name="blackjack", description="開啟21點遊戲")
 async def blackjack(ctx: discord.ApplicationContext, bet: float):
     bet = round(bet, 2)
-
+    
     user_id = str(ctx.author.id)
     guild_id = str(ctx.guild.id)
 
@@ -585,8 +763,8 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     config = load_yaml("config_user.yml")
     balance = load_json("balance.json")
     invalid_bet_count = load_json("invalid_bet_count.json")
+    blackjack_data = load_json("blackjack_data.json")
 
-    # 防止輸入 0 或負數賭注，超過兩次刪除玩家資料
     if bet <= 0:
         invalid_bet_count.setdefault(guild_id, {}).setdefault(user_id, 0)
         invalid_bet_count[guild_id][user_id] += 1
@@ -612,7 +790,6 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
         ))
         return
 
-    player_job = config.get(guild_id, {}).get(user_id, {}).get("job", "")
     user_balance = round(balance.get(guild_id, {}).get(user_id, 0), 2)
 
     if user_balance < bet:
@@ -622,9 +799,6 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             color=discord.Color.red()
         ))
         return
-
-    balance.setdefault(guild_id, {})[user_id] = round(user_balance - bet, 2)
-    save_json("balance.json", balance)
 
     def create_deck():
         return [2, 3, 4, 5, 6, 7, 8, 9, 10, "J", "Q", "K", "A"] * 4
@@ -656,6 +830,39 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     player_cards = [draw_card(), draw_card()]
     dealer_cards = [draw_card(), draw_card()]
 
+    balance[guild_id][user_id] = round(user_balance - bet, 2)
+    save_json("balance.json", balance)
+
+    blackjack_data.setdefault(guild_id, {})[user_id] = {
+        "player_cards": player_cards,
+        "dealer_cards": dealer_cards,
+        "bet": bet,
+        "game_status": "ongoing",
+        "double_down_used": False
+    }
+    save_json("blackjack_data.json", blackjack_data)
+
+    async def auto_settle():
+        player_total = calculate_hand(player_cards)
+        if player_total == 21:
+            blackjack_data[guild_id][user_id]["game_status"] = "ended"
+            save_json("blackjack_data.json", blackjack_data)
+
+            reward = round(bet * 2.5, 2)
+            balance[guild_id][user_id] += reward
+            save_json("balance.json", balance)
+
+            await ctx.respond(embed=discord.Embed(
+                title="黑傑克！你獲勝了！",
+                description=f"你的手牌: {player_cards}\n你贏得了 {reward:.2f} 幽靈幣！",
+                color=discord.Color.gold()
+            ))
+            return True
+        return False
+
+    if await auto_settle():
+        return
+
     embed = discord.Embed(
         title="21點遊戲開始！",
         description=(f"你下注了 **{bet:.2f} 幽靈幣**\n"
@@ -666,122 +873,107 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     embed.set_footer(text="選擇你的操作！")
 
     class BlackjackButtons(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=120)
-            self.double_down_used = False  # 追蹤雙倍下注是否被使用
-            self.hit_used = False  # 追蹤玩家是否抽過牌
-
         @discord.ui.button(label="抽牌 (Hit)", style=discord.ButtonStyle.primary)
         async def hit(self, button: discord.ui.Button, interaction: discord.Interaction):
-            nonlocal player_cards
-            self.hit_used = True  # 玩家已抽牌，禁用雙倍下注
-            self.children[2].disabled = True  # 禁用雙倍下注按鈕
-            
+            blackjack_data = load_json("blackjack_data.json")
+            player_cards = blackjack_data[guild_id][user_id]["player_cards"]
             player_cards.append(draw_card())
+
+            blackjack_data[guild_id][user_id]["player_cards"] = player_cards
+            save_json("blackjack_data.json", blackjack_data)
+
             player_total = calculate_hand(player_cards)
 
             if player_total > 21:
                 embed = discord.Embed(
                     title="殘念，你爆了！",
                     description=f"你的手牌: {player_cards}\n點數總計: {player_total}",
-                    color=discord.Color.from_rgb(204, 0, 51)
+                    color=discord.Color.red()
                 )
                 await interaction.response.edit_message(embed=embed, view=None)
-                self.stop()
-            else:
-                embed = discord.Embed(
-                    title="你抽了一張牌！",
-                    description=f"你的手牌: {player_cards}\n目前點數: {player_total}",
-                    color=discord.Color.from_rgb(204, 0, 51)
-                )
-                await interaction.response.edit_message(embed=embed, view=self)
-
-        @discord.ui.button(label="雙倍下注 (Double Down)", style=discord.ButtonStyle.success)
-        async def double_down(self, button: discord.ui.Button, interaction: discord.Interaction):
-            nonlocal player_cards, bet
-
-            if self.hit_used:  # 防止玩家已經抽過牌還能雙倍下注
-                await interaction.response.send_message("你已經抽過牌，無法再進行雙倍下注！", ephemeral=True)
                 return
 
-            if balance[guild_id][user_id] < bet:
-                await interaction.response.send_message("餘額不足，無法雙倍下注！", ephemeral=True)
+            if await auto_settle():
                 return
 
-            bet *= 2
-            balance[guild_id][user_id] -= bet // 2
-            save_json("balance.json", balance)
-
-            player_cards.append(draw_card())
-            player_total = calculate_hand(player_cards)
-
-            self.children[2].disabled = True
-            self.children[0].disabled = True
-            self.double_down_used = True
-
-            if player_total > 21:
-                embed = discord.Embed(
-                    title="殘念，你爆了！",
-                    description=f"你的手牌: {player_cards}\n點數總計: {player_total}",
-                    color=discord.Color.from_rgb(204, 0, 51)
-                )
-            else:
-                dealer_total = calculate_hand(dealer_cards)
-                while dealer_total < 17:
-                    dealer_cards.append(draw_card())
-                    dealer_total = calculate_hand(dealer_cards)
-
-                if dealer_total > 21 or player_total > dealer_total:
-                    reward = round(bet * 2, 2)
-                    if player_job == "賭徒":
-                        reward += bet
-                        reward *= 2
-                    balance[guild_id][user_id] += reward
-                    save_json("balance.json", balance)
-                    embed = discord.Embed(
-                        title="恭賀，你贏了！",
-                        description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
-                        color=discord.Color.gold()
-                    )
-                else:
-                    embed = discord.Embed(
-                        title="殘念，莊家贏了！",
-                        description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}",
-                        color=discord.Color.from_rgb(204, 0, 51)
-                    )
-
-            await interaction.response.edit_message(embed=embed, view=self if not self.double_down_used else None)
-            self.stop() if self.double_down_used else None
+            embed = discord.Embed(
+                title="你抽了一張牌！",
+                description=f"你的手牌: {player_cards}\n目前點數: {player_total}",
+                color=discord.Color.from_rgb(204, 0, 51)
+            )
+            await interaction.response.edit_message(embed=embed, view=self)
 
         @discord.ui.button(label="停牌 (Stand)", style=discord.ButtonStyle.danger)
         async def stand(self, button: discord.ui.Button, interaction: discord.Interaction):
+            blackjack_data[guild_id][user_id]["game_status"] = "ended"
+            save_json("blackjack_data.json", blackjack_data)
+
             dealer_total = calculate_hand(dealer_cards)
             while dealer_total < 17:
                 dealer_cards.append(draw_card())
                 dealer_total = calculate_hand(dealer_cards)
 
             player_total = calculate_hand(player_cards)
-            
+
             if dealer_total > 21 or player_total > dealer_total:
                 reward = round(bet * 2, 2)
-                if player_job == "賭徒":
-                    reward += bet
-                    reward *= 2
                 balance[guild_id][user_id] += reward
                 save_json("balance.json", balance)
                 embed = discord.Embed(
                     title="恭賀，你贏了！",
-                    description=f"莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
+                    description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
                     color=discord.Color.gold()
                 )
             else:
                 embed = discord.Embed(
                     title="殘念，莊家贏了！",
-                    description=f"莊家的手牌: {dealer_cards}",
-                    color=discord.Color.from_rgb(204, 0, 51)
+                    description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}",
+                    color=discord.Color.red()
                 )
+
             await interaction.response.edit_message(embed=embed, view=None)
-            self.stop()
+            
+        @discord.ui.button(label="雙倍下注 (Double Down)", style=discord.ButtonStyle.success)
+        async def double_down(self, button: discord.ui.Button, interaction: discord.Interaction):
+            blackjack_data = load_json("blackjack_data.json")
+
+            if blackjack_data[guild_id][user_id]["double_down_used"]:
+                await interaction.response.send_message("你已經使用過雙倍下注！", ephemeral=True)
+                return
+
+            if user_balance < bet:
+                await interaction.response.send_message("你的餘額不足，無法使用雙倍下注！", ephemeral=True)
+                return
+
+            blackjack_data[guild_id][user_id]["bet"] *= 2
+            blackjack_data[guild_id][user_id]["double_down_used"] = True
+            balance[guild_id][user_id] -= bet
+            save_json("balance.json", balance)
+            save_json("blackjack_data.json", blackjack_data)
+
+            player_cards.append(draw_card())
+            player_total = calculate_hand(player_cards)
+
+            embed = discord.Embed(
+                title="雙倍下注！",
+                description=f"你的手牌: {player_cards} (總點數: {player_total})\n賭注翻倍為 {blackjack_data[guild_id][user_id]['bet']:.2f} 幽靈幣",
+                color=discord.Color.gold()
+            )
+
+            blackjack_data[guild_id][user_id]["game_status"] = "ended"
+            save_json("blackjack_data.json", blackjack_data)
+
+            await interaction.response.edit_message(embed=embed, view=None)
+
+            if player_total > 21:
+                await ctx.send(embed=discord.Embed(
+                    title="你爆了！",
+                    description=f"你的手牌: {player_cards}\n總點數: {player_total}",
+                    color=discord.Color.red()
+                ))
+                return
+
+            await auto_settle()
 
     await ctx.respond(embed=embed, view=BlackjackButtons())
 
