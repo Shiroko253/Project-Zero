@@ -27,7 +27,6 @@ from filelock import FileLock
 from omikuji import draw_lots
 from responses import food_responses, death_responses, life_death_responses, self_responses, friend_responses, maid_responses, mistress_responses, reimu_responses, get_random_response
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
-from status_updater import update_status
 from functools import wraps
 
 load_dotenv()
@@ -174,8 +173,10 @@ async def write_balance_file(data):
 disconnect_count = 0
 last_disconnect_time = None
 MAX_DISCONNECTS = 3
-MAX_DOWN_TIME = 20  # 超過 20 秒就發送警報
-CHECK_INTERVAL = 3  # 每 3 秒檢查一次
+MAX_DOWN_TIME = 20
+MAX_RETRIES = 5
+RETRY_DELAY = 10
+CHECK_INTERVAL = 3
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
 def load_status():
@@ -184,10 +185,17 @@ def load_status():
         with open("bot_status.json", "r", encoding="utf-8") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"disconnects": []}
+        return {"disconnect_count": 0, "reconnect_count": 0, "last_event_time": None}
 
-def save_status(data):
+def save_status(disconnects=None, reconnects=None):
     """儲存機器人的斷線記錄"""
+    data = load_status()
+    if disconnects is not None:
+        data["disconnect_count"] += disconnects
+    if reconnects is not None:
+        data["reconnect_count"] += reconnects
+    data["last_event_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     with open("bot_status.json", "w", encoding="utf-8") as f:
         json.dump(data, f, indent=4, ensure_ascii=False)
 
@@ -199,28 +207,74 @@ async def check_long_disconnect():
         if last_disconnect_time:
             elapsed = (datetime.now() - last_disconnect_time).total_seconds()
             if elapsed > MAX_DOWN_TIME:
-                send_alert(f"⚠️ 警告：機器人已斷線超過 {MAX_DOWN_TIME} 秒，可能是伺服器網絡問題！")
+                await send_alert_async(f"⚠️ 警告：機器人已斷線超過 {MAX_DOWN_TIME} 秒，可能是伺服器網絡問題！")
                 last_disconnect_time = None
-        await asyncio.sleep(CHECK_INTERVAL)  # 每 3 秒檢查一次
+        await asyncio.sleep(CHECK_INTERVAL)
 
-def send_alert(message):
-    """使用 Discord Webhook 發送警報"""
+async def send_alert_async(message):
+    """使用 Discord Webhook 發送警報（異步 + 重試機制，改為嵌入格式）"""
     if not DISCORD_WEBHOOK_URL:
         print("❌ [錯誤] 未設置 Webhook URL，無法發送警報。")
         return
 
-    data = {
-        "content": f"🚨 **警報通知** 🚨\n📢 {message}\n🕒 時間：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+    embed = {
+        "title": "🚨 警報通知 🚨",
+        "description": f"📢 {message}",
+        "color": 0xFFA500,
+        "timestamp": datetime.now().isoformat(),
+        "footer": {"text": "⚠️ 自動警報系統"}
     }
 
-    try:
-        response = requests.post(DISCORD_WEBHOOK_URL, json=data)
-        if response.status_code == 204:
-            print("✅ [通知] 警報已發送到 Discord。")
-        else:
-            print(f"⚠️ [警告] Webhook 發送失敗，狀態碼: {response.status_code}, 回應: {response.text}")
-    except Exception as e:
-        print(f"❌ [錯誤] 無法發送 Webhook: {e}")
+    data = {"embeds": [embed]}
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(DISCORD_WEBHOOK_URL, json=data, timeout=5) as response:
+                    if 200 <= response.status < 300:
+                        print("✅ [通知] 警報已發送到 Discord。")
+                        return
+                    else:
+                        print(f"⚠️ [警告] Webhook 發送失敗（狀態碼: {response.status}），回應: {await response.text()}")
+
+        except asyncio.TimeoutError:
+            print(f"⚠️ [重試 {attempt}/{MAX_RETRIES}] 發送 Webhook 超時，{RETRY_DELAY} 秒後重試...")
+        except aiohttp.ClientConnectionError:
+            print(f"⚠️ [重試 {attempt}/{MAX_RETRIES}] 無法連接 Discord Webhook，{RETRY_DELAY} 秒後重試...")
+        except Exception as e:
+            print(f"❌ [錯誤] 無法發送 Webhook: {e}")
+            break
+
+        await asyncio.sleep(RETRY_DELAY)
+
+    print("❌ [錯誤] 多次重試後仍然無法發送 Webhook，請檢查網絡連接。")
+
+@bot.event
+async def on_disconnect():
+    """當機器人斷線時記錄事件"""
+    global disconnect_count, last_disconnect_time
+
+    disconnect_count += 1
+    last_disconnect_time = datetime.now()
+
+    save_status(disconnects=1)
+
+    print(f"[警告] 機器人於 {last_disconnect_time.strftime('%Y-%m-%d %H:%M:%S')} 斷線。（第 {disconnect_count} 次）")
+
+    if disconnect_count >= MAX_DISCONNECTS:
+        asyncio.create_task(send_alert_async(f"⚠️ 機器人短時間內已斷線 {disconnect_count} 次！"))
+
+@bot.event
+async def on_resumed():
+    """當機器人重新連接時記錄事件"""
+    global disconnect_count, last_disconnect_time
+
+    save_status(reconnects=1)
+
+    print(f"[訊息] 機器人於 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 重新連接。")
+
+    disconnect_count = 0
+    last_disconnect_time = None
 
 def init_db():
     conn = sqlite3.connect("example.db")
@@ -321,7 +375,7 @@ def generate_response(prompt, user_id):
         ]
 
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=messages
         )
 
@@ -340,6 +394,21 @@ def get_user_background_info(user_id):
     rows = c.fetchall()
     conn.close()
     return "\n".join([row[0] for row in rows]) if rows else None
+
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+
+async def send_global_webhook_message(content, color=discord.Color.green()):
+    """ 發送全局 Webhook 消息到 Discord """
+    if not WEBHOOK_URL:
+        print("Webhook URL 未設置，跳過通知")
+        return
+
+    embed = discord.Embed(description=content, color=color)
+    embed.set_footer(text="Bot 狀態通知")
+
+    async with aiohttp.ClientSession() as session:
+        webhook = discord.Webhook.from_url(WEBHOOK_URL, session=session)
+        await webhook.send(embed=embed)
 
 @bot.event
 async def on_message(message):
@@ -388,7 +457,8 @@ async def on_message(message):
     if message.content.startswith('關閉幽幽子'):
         if message.author.id == AUTHOR_ID:
             await message.channel.send("正在關閉...")
-            await asyncio.sleep(2)
+            await send_global_webhook_message("🔴 **機器人即將關機**", discord.Color.red())
+            await asyncio.sleep(3)
             await bot.close()
             return
         else:
@@ -398,6 +468,8 @@ async def on_message(message):
     elif message.content.startswith('重啓幽幽子'):
         if message.author.id == AUTHOR_ID:
             await message.channel.send("正在重啟幽幽子...")
+            await send_global_webhook_message("🔄 **機器人即將重啟...**", discord.Color.orange())
+            await asyncio.sleep(3)
             subprocess.Popen([sys.executable, os.path.abspath(__file__)])
             await bot.close()
             return
@@ -590,85 +662,44 @@ async def on_message(message):
                 await message.channel.send("這個伺服器內沒有普通成員。")
         else:
             await message.channel.send("這個能力只能在伺服器內使用。")
-            
-    if message.content.startswith('幽幽子你也該去睡覺了'):
-        now = datetime.now()
-        current_hour = now.hour
-
-        if 21 <= current_hour or current_hour < 5:
-            if message.author.id == AUTHOR_ID:
-                await message.reply("知道了~ 你也是準備去睡了")
-                await asyncio.sleep(3)
-                await message.reply("晚安 我可愛的主人")
-                await asyncio.sleep(5)
-                await bot.close()
-            else:
-                await message.reply("你無權使用該能力")
-        else:
-            bot_name = bot.user.name
-            formatted_time = now.strftime("%H:%M")
-            await message.reply(f"現在的時間是 {formatted_time}，{bot_name} 還不困~")
-            return
 
     await bot.process_commands(message)
 
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user} (ID: {bot.user.id})")
+    
     print("------")
+    
     print("斜線指令已自動同步。")
+    
+    await send_global_webhook_message("✅ **機器人已上線！**", discord.Color.green())
+    
     try:
         await bot.change_presence(
-            status=discord.Status.online,
+            status=discord.Status.dnd,
             activity=discord.Activity(type=discord.ActivityType.playing, name='正在和主人貼貼')
         )
         print("已設置機器人的狀態。")
+    
     except Exception as e:
         print(f"Failed to set presence: {e}")
+    
     end_time = time.time()
     startup_time = end_time - start_time
     print(f'Bot startup time: {startup_time:.2f} seconds')
+    
     print('加入的伺服器列表：')
     for guild in bot.guilds:
         print(f'- {guild.name} (ID: {guild.id})')
+    
     global last_activity_time
     last_activity_time = time.time()
-    update_status(bot_online=True, server_count=len(bot.guilds), ping=bot.latency * 1000)
+    
     bot.loop.create_task(check_long_disconnect())
+    
     init_db()
 
-@bot.event
-async def on_disconnect():
-    """當機器人斷線時記錄事件"""
-    global disconnect_count, last_disconnect_time
-
-    disconnect_count += 1
-    last_disconnect_time = datetime.now()
-    now_str = last_disconnect_time.strftime("%Y-%m-%d %H:%M:%S")
-
-    data = load_status()
-    data["disconnects"].append({"event": "disconnect", "timestamp": now_str})
-    save_status(data)
-
-    print(f"[警告] 機器人於 {now_str} 斷線。（第 {disconnect_count} 次）")
-
-    if disconnect_count >= MAX_DISCONNECTS:
-        send_alert(f"⚠️ 機器人短時間內已斷線 {disconnect_count} 次！")
-
-@bot.event
-async def on_resumed():
-    """當機器人重新連接時記錄事件"""
-    global disconnect_count, last_disconnect_time
-
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    data = load_status()
-    data["disconnects"].append({"event": "reconnect", "timestamp": now_str})
-    save_status(data)
-
-    print(f"[訊息] 機器人於 {now_str} 重新連接。")
-
-    disconnect_count = 0
-    last_disconnect_time = None
 
 @bot.slash_command(name="invite", description="生成机器人的邀请链接")
 async def invite(ctx: discord.ApplicationContext):
@@ -704,35 +735,6 @@ async def invite(ctx: discord.ApplicationContext):
     if bot.user.avatar:
         embed.set_thumbnail(url=bot.user.display_avatar.url)
     embed.set_footer(text="感谢您的支持，让幽幽子加入您的服务器！")
-    await ctx.respond(embed=embed)
-    
-@bot.slash_command(name="about-me", description="關於機器人")
-async def about_me(ctx: discord.ApplicationContext):
-    if not bot.user:
-        await ctx.respond(
-            "抱歉，無法提供關於機器人的資訊，目前機器人尚未正確啟動。",
-            ephemeral=True
-        )
-        return
-
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    embed = discord.Embed(
-        title="關於我",
-        description=(
-            "早上好，用戶！\n\n"
-            "我是幽幽子機器人 \n"
-            "你可以使用 `/` 來查看我的指令。\n"
-            "同時，你也可以使用 `/help` 來獲取更詳細的幫助。\n\n"
-            "不過，如果你想知道我是用什麼庫製作的話...... 不告訴你 "
-        ),
-        color=discord.Color.from_rgb(255, 182, 193)
-    )
-
-    if bot.user.avatar:
-        embed.set_thumbnail(url=bot.user.display_avatar.url)
-
-    embed.set_footer(text=f"{now}")
     await ctx.respond(embed=embed)
 
 @bot.slash_command(name="blackjack", description="開啟21點遊戲")
@@ -803,9 +805,6 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     def create_deck():
         return [2, 3, 4, 5, 6, 7, 8, 9, 10, "J", "Q", "K", "A"] * 4
 
-    def draw_card():
-        return deck.pop()
-
     def calculate_hand(cards):
         value = 0
         aces = 0
@@ -827,8 +826,8 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     deck = create_deck()
     random.shuffle(deck)
 
-    player_cards = [draw_card(), draw_card()]
-    dealer_cards = [draw_card(), draw_card()]
+    player_cards = [deck.pop(), deck.pop()]
+    dealer_cards = [deck.pop(), deck.pop()]
 
     balance[guild_id][user_id] = round(user_balance - bet, 2)
     save_json("balance.json", balance)
@@ -873,11 +872,19 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     embed.set_footer(text="選擇你的操作！")
 
     class BlackjackButtons(discord.ui.View):
+        def __init__(self, deck):
+            super().__init__()
+            self.deck = deck
+
         @discord.ui.button(label="抽牌 (Hit)", style=discord.ButtonStyle.primary)
         async def hit(self, button: discord.ui.Button, interaction: discord.Interaction):
+            guild_id = str(interaction.guild.id)
+            user_id = str(interaction.user.id)
+            
             blackjack_data = load_json("blackjack_data.json")
             player_cards = blackjack_data[guild_id][user_id]["player_cards"]
-            player_cards.append(draw_card())
+
+            player_cards.append(self.deck.pop())
 
             blackjack_data[guild_id][user_id]["player_cards"] = player_cards
             save_json("blackjack_data.json", blackjack_data)
@@ -885,32 +892,35 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             player_total = calculate_hand(player_cards)
 
             if player_total > 21:
-                embed = discord.Embed(
+                await interaction.response.edit_message(embed=discord.Embed(
                     title="殘念，你爆了！",
                     description=f"你的手牌: {player_cards}\n點數總計: {player_total}",
                     color=discord.Color.red()
-                )
-                await interaction.response.edit_message(embed=embed, view=None)
+                ), view=None)
                 return
 
             if await auto_settle():
                 return
 
-            embed = discord.Embed(
+            await interaction.response.edit_message(embed=discord.Embed(
                 title="你抽了一張牌！",
                 description=f"你的手牌: {player_cards}\n目前點數: {player_total}",
                 color=discord.Color.from_rgb(204, 0, 51)
-            )
-            await interaction.response.edit_message(embed=embed, view=self)
+            ), view=self)
 
         @discord.ui.button(label="停牌 (Stand)", style=discord.ButtonStyle.danger)
         async def stand(self, button: discord.ui.Button, interaction: discord.Interaction):
+            guild_id = str(interaction.guild.id)
+            user_id = str(interaction.user.id)
+            blackjack_data = load_json("blackjack_data.json")
+            dealer_cards = blackjack_data[guild_id][user_id]["dealer_cards"]
+
             blackjack_data[guild_id][user_id]["game_status"] = "ended"
             save_json("blackjack_data.json", blackjack_data)
 
             dealer_total = calculate_hand(dealer_cards)
             while dealer_total < 17:
-                dealer_cards.append(draw_card())
+                dealer_cards.append(self.deck.pop())
                 dealer_total = calculate_hand(dealer_cards)
 
             player_total = calculate_hand(player_cards)
@@ -935,24 +945,42 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             
         @discord.ui.button(label="雙倍下注 (Double Down)", style=discord.ButtonStyle.success)
         async def double_down(self, button: discord.ui.Button, interaction: discord.Interaction):
+            guild_id = str(interaction.guild.id)
+            user_id = str(interaction.user.id)
             blackjack_data = load_json("blackjack_data.json")
+            balance = load_json("balance.json")
 
             if blackjack_data[guild_id][user_id]["double_down_used"]:
-                await interaction.response.send_message("你已經使用過雙倍下注！", ephemeral=True)
+                await interaction.response.edit_message(embed=discord.Embed(
+                    title="無法雙倍下注！",
+                    description="你已經使用過雙倍下注！",
+                    color=discord.Color.red()
+                ), view=None)
                 return
 
+            bet = blackjack_data[guild_id][user_id]["bet"]
+            user_balance = balance[guild_id][user_id]
+
             if user_balance < bet:
-                await interaction.response.send_message("你的餘額不足，無法使用雙倍下注！", ephemeral=True)
+                await interaction.response.edit_message(embed=discord.Embed(
+                    title="餘額不足！",
+                    description="你的餘額不足，無法使用雙倍下注！",
+                    color=discord.Color.red()
+                ), view=None)
                 return
 
             blackjack_data[guild_id][user_id]["bet"] *= 2
             blackjack_data[guild_id][user_id]["double_down_used"] = True
             balance[guild_id][user_id] -= bet
+
+            player_cards = blackjack_data[guild_id][user_id]["player_cards"]
+            dealer_cards = blackjack_data[guild_id][user_id]["dealer_cards"]
+            player_cards.append(self.deck.pop())
+            player_total = calculate_hand(player_cards)
+
+            blackjack_data[guild_id][user_id]["game_status"] = "ended"
             save_json("balance.json", balance)
             save_json("blackjack_data.json", blackjack_data)
-
-            player_cards.append(draw_card())
-            player_total = calculate_hand(player_cards)
 
             embed = discord.Embed(
                 title="雙倍下注！",
@@ -960,22 +988,96 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
                 color=discord.Color.gold()
             )
 
-            blackjack_data[guild_id][user_id]["game_status"] = "ended"
-            save_json("blackjack_data.json", blackjack_data)
+            if player_total > 21:
+                embed.title = "你爆了！"
+                embed.description = f"你的手牌: {player_cards}\n總點數: {player_total}"
+                embed.color = discord.Color.red()
+                await interaction.response.edit_message(embed=embed, view=None)
+                return
+
+            dealer_total = calculate_hand(dealer_cards)
+            while dealer_total < 17:
+                dealer_cards.append(self.deck.pop())
+                dealer_total = calculate_hand(dealer_cards)
+
+            if dealer_total > 21 or player_total > dealer_total:
+                reward = blackjack_data[guild_id][user_id]["bet"] * 2
+                balance[guild_id][user_id] += reward
+                save_json("balance.json", balance)
+                embed.title = "恭賀，你贏了！"
+                embed.description = f"你的手牌: {player_cards}\n莊家手牌: {dealer_cards}\n獎勵: {reward:.2f} 幽靈幣"
+                embed.color = discord.Color.gold()
+            elif player_total == dealer_total:
+                reward = blackjack_data[guild_id][user_id]["bet"]
+                balance[guild_id][user_id] += reward
+                save_json("balance.json", balance)
+                embed.title = "平手！"
+                embed.description = f"你的手牌: {player_cards}\n莊家手牌: {dealer_cards}\n退還賭注: {reward:.2f} 幽靈幣"
+                embed.color = discord.Color.from_rgb(204, 0, 51)
+            else:
+                embed.title = "殘念，莊家贏了！"
+                embed.description = f"你的手牌: {player_cards}\n莊家手牌: {dealer_cards}"
+                embed.color = discord.Color.red()
 
             await interaction.response.edit_message(embed=embed, view=None)
 
-            if player_total > 21:
-                await ctx.send(embed=discord.Embed(
-                    title="你爆了！",
-                    description=f"你的手牌: {player_cards}\n總點數: {player_total}",
-                    color=discord.Color.red()
-                ))
-                return
+    await ctx.respond(embed=embed, view=BlackjackButtons(deck))
 
-            await auto_settle()
+@bot.slash_command(name="about-me", description="關於機器人")
+async def about_me(ctx: discord.ApplicationContext):
+    if not bot.user:
+        await ctx.respond(
+            "抱歉，無法提供關於機器人的資訊，目前機器人尚未正確啟動。",
+            ephemeral=True
+        )
+        return
 
-    await ctx.respond(embed=embed, view=BlackjackButtons())
+    current_hour = datetime.now().hour
+    if 5 <= current_hour < 12:
+        greeting = "早上好"
+    elif 12 <= current_hour < 18:
+        greeting = "下午好"
+    else:
+        greeting = "晚上好"
+
+    embed = discord.Embed(
+        title="👋 關於幽幽子機器人",
+        description=(
+            f"{greeting}，{ctx.author.mention}！\n\n"
+            "我是你的好夥伴幽幽子，專門來協助你完成各種有趣的事務。\n"
+            "使用 `/` 指令來探索我的功能，若需要更詳細的幫助，請輸入 `/help` 查看。\n\n"
+            "希望我能成為你的好助手！"
+        ),
+        color=discord.Color.from_rgb(219, 112, 147),
+        timestamp=datetime.now()
+    )
+
+    if bot.user.avatar:
+        embed.set_thumbnail(url=bot.user.display_avatar.url)
+
+    embed.add_field(
+        name="🤖 機器人資訊",
+        value=(
+            f"- **名稱：** {bot.user.name}\n"
+            f"- **ID：** {bot.user.id}\n"
+            f"- **開發語言：** Python + Pycord\n"
+            f"- **狀態：** 在綫"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🛠️ 開發者資訊",
+        value=(
+            "- **開發者：** Miya253(Shiroko253)\n"
+            "- [Project-Zero](https://github.com/Shiroko253/Project-zero)"
+        ),
+        inline=False
+    )
+
+    embed.set_footer(text="感謝你的支持，祝你使用愉快！")
+
+    await ctx.respond(embed=embed)
 
 @bot.slash_command(name="balance", description="查询用户余额")
 @track_balance_json
@@ -1351,93 +1453,98 @@ async def reset_job(ctx):
 @bot.slash_command(name="work", description="執行你的工作並賺取幽靈幣！")
 @track_balance_json
 async def work(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=False)
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=False)
 
-    user_data = load_yaml('config_user.yml') or {}
-    user_balance = load_json('balance.json') or {}
-    
-    guild_id = str(interaction.guild.id)
-    user_id = str(interaction.user.id)
+        user_data = load_yaml('config_user.yml') or {}
+        user_balance = load_json('balance.json') or {}
 
-    user_balance.setdefault(guild_id, {})
+        guild_id = str(interaction.guild.id)
+        user_id = str(interaction.user.id)
 
-    user_info = user_data.setdefault(guild_id, {}).setdefault(user_id, {})
-    if not user_info.get("job"):
-        await interaction.followup.send(
-            "你尚未選擇職業，請先使用 `/choose_job` 選擇你的職業！", ephemeral=True
-        )
-        return
+        user_balance.setdefault(guild_id, {})
+        user_info = user_data.setdefault(guild_id, {}).setdefault(user_id, {})
 
-    job_name = user_info["job"]
+        if not user_info.get("job"):
+            await interaction.followup.send(
+                "你尚未選擇職業，請先使用 `/choose_job` 選擇你的職業！", ephemeral=True
+            )
+            return
 
-    if isinstance(jobs_data, list):
-        jobs_dict = {job["name"]: job for job in jobs_data if "name" in job}
-    else:
-        jobs_dict = jobs_data
+        job_name = user_info["job"]
 
-    if job_name == "賭徒":
+        if isinstance(jobs_data, list):
+            jobs_dict = {job["name"]: job for job in jobs_data if "name" in job}
+        else:
+            jobs_dict = jobs_data
+
+        if job_name == "賭徒":
+            embed = discord.Embed(
+                title="工作系統",
+                description="你選擇了刺激的道路，工作？ 哼~ 那對於我來說太枯燥了，賭博才是工作的樂趣！",
+                color=discord.Color.from_rgb(255, 0, 0)
+            )
+            await interaction.followup.send(embed=embed, ephemeral=False)
+            return
+
+        job_rewards = jobs_dict.get(job_name)
+        if not job_rewards:
+            await interaction.followup.send(
+                f"無效的職業: {job_name}，請重新選擇！", ephemeral=True
+            )
+            return
+
+        user_info.setdefault("MP", 0)
+
+        if user_info["MP"] >= 200:
+            await interaction.followup.send(
+                "你的心理壓力已達到最大值！請休息一下再繼續工作。", ephemeral=True
+            )
+            return
+
+        last_cooldown = user_info.get("work_cooldown")
+        now = datetime.now()
+        if last_cooldown and datetime.fromisoformat(last_cooldown) > now:
+            remaining = datetime.fromisoformat(last_cooldown) - now
+            minutes, seconds = divmod(remaining.total_seconds(), 60)
+            embed = discord.Embed(
+                title="冷卻中",
+                description=f"你正在冷卻中，還需等待 {int(minutes)} 分鐘 {int(seconds)} 秒！",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text=f"職業: {job_name}")
+            await interaction.followup.send(embed=embed, ephemeral=False)
+            return
+
+        reward = random.randint(job_rewards["min"], job_rewards["max"])
+
+        user_balance[guild_id].setdefault(user_id, 0)
+        user_balance[guild_id][user_id] += reward
+
+        user_info["work_cooldown"] = (now + timedelta(seconds=WORK_COOLDOWN_SECONDS)).isoformat()
+        user_info["MP"] += 10
+
+        save_json("balance.json", user_balance)
+        save_yaml("config_user.yml", user_data)
+
         embed = discord.Embed(
-            title="工作系統",
-            description="你選擇了刺激的道路，工作？ 哼~ 那對於我來說太枯燥了，賭博才是工作的樂趣！",
-            color=discord.Color.from_rgb(255, 0, 0)
-        )
-        await interaction.followup.send(embed=embed, ephemeral=False)
-        return
-
-    job_rewards = jobs_dict.get(job_name)
-    if not job_rewards:
-        await interaction.followup.send(
-            f"無效的職業: {job_name}，請重新選擇！", ephemeral=True
-        )
-        return
-
-    user_info.setdefault("MP", 0)
-
-    if user_info["MP"] >= 200:
-        await interaction.followup.send(
-            "你的心理壓力已達到最大值！請休息一下再繼續工作。", ephemeral=True
-        )
-        return
-
-    last_cooldown = user_info.get("work_cooldown")
-    now = datetime.now()
-    if last_cooldown and datetime.fromisoformat(last_cooldown) > now:
-        remaining = datetime.fromisoformat(last_cooldown) - now
-        minutes, seconds = divmod(remaining.total_seconds(), 60)
-        embed = discord.Embed(
-            title="冷卻中",
-            description=f"你正在冷卻中，還需等待 {int(minutes)} 分鐘 {int(seconds)} 秒！",
-            color=discord.Color.red()
+            title="工作成功！",
+            description=(
+                f"{interaction.user.mention} 作為 **{job_name}** "
+                f"賺取了 **{reward} 幽靈幣**！🎉\n"
+                f"當前心理壓力（MP）：{user_info['MP']}/200"
+            ),
+            color=discord.Color.green()
         )
         embed.set_footer(text=f"職業: {job_name}")
-        await interaction.followup.send(embed=embed, ephemeral=False)
-        return
 
-    reward = random.randint(job_rewards["min"], job_rewards["max"])
+        await interaction.followup.send(embed=embed)
 
-    user_balance[guild_id].setdefault(user_id, 0)
-    
-    user_balance[guild_id][user_id] += reward
-
-    user_info["work_cooldown"] = (now + timedelta(seconds=WORK_COOLDOWN_SECONDS)).isoformat()
-
-    user_info["MP"] += 10
-
-    save_json("balance.json", user_balance)
-    save_yaml("config_user.yml", user_data)
-
-    embed = discord.Embed(
-        title="工作成功！",
-        description=(
-            f"{interaction.user.mention} 作為 **{job_name}** "
-            f"賺取了 **{reward} 幽靈幣**！🎉\n"
-            f"當前心理壓力（MP）：{user_info['MP']}/200"
-        ),
-        color=discord.Color.green()
-    )
-    embed.set_footer(text=f"職業: {job_name}")
-    
-    await interaction.followup.send(embed=embed)
+    except Exception as e:
+        print(f"[ERROR] work 指令錯誤: {e}")
+        if not interaction.response.is_done():
+            await interaction.followup.send("執行工作時發生錯誤，請稍後再試。")
 
 def convert_decimal_to_float(data):
     """遞歸將 Decimal 類型轉換為 float，並限制為兩位小數"""
@@ -1589,10 +1696,9 @@ async def removemoney(interaction: discord.Interaction, member: discord.Member, 
 async def shutdown(interaction: discord.Interaction):
     if interaction.user.id == AUTHOR_ID:
         try:
-            await interaction.response.defer(ephemeral=True)
-
-            await interaction.followup.send("关闭中...")
-
+            await interaction.response.send_message("关闭中...", ephemeral=True)
+            await send_global_webhook_message("🔴 **機器人即將關機**", discord.Color.red())
+            await asyncio.sleep(3)
             await bot.close()
         except Exception as e:
             logging.error(f"Shutdown command failed: {e}")
@@ -1604,11 +1710,13 @@ async def shutdown(interaction: discord.Interaction):
 async def restart(interaction: discord.Interaction):
     if interaction.user.id == AUTHOR_ID:
         try:
-            await interaction.response.defer(ephemeral=True)
-            await interaction.followup.send("重启中...")
-            os.execv(sys.executable, ['python'] + sys.argv)
+            await interaction.response.send_message("重启中...", ephemeral=True)
+            await send_global_webhook_message("🔄 **機器人即將重啟...**", discord.Color.orange())
+            await asyncio.sleep(3)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
         except Exception as e:
-            print(f"Restart command failed: {e}")
+            logging.error(f"Restart command failed: {e}")
+            await interaction.followup.send(f"重启失败，错误信息：{e}", ephemeral=True)
     else:
         await interaction.response.send_message("你没有权限执行此操作。", ephemeral=True)
 
@@ -2463,16 +2571,6 @@ async def fish(ctx: discord.ApplicationContext):
 
     await ctx.respond(embed=embed, view=view)
 
-@bot.slash_command(name="fish_rod", description="切換魚杆")
-async def fish_rod(ctx: discord.ApplicationContext):
-    embed = discord.Embed(
-        title="釣魚系統通知",
-        description="魚竿正在維護中，預計完成時間：未知。",
-        color=discord.Color.red()
-    )
-    embed.set_footer(text="很抱歉無法使用該指令")
-    await ctx.respond(embed=embed)
-
 def load_fish_data():
     if not os.path.exists('fishiback.yml'):
         with open('fishiback.yml', 'w', encoding='utf-8') as file:
@@ -2644,7 +2742,7 @@ async def quiz(ctx: discord.ApplicationContext):
 async def rpg_start(ctx: discord.ApplicationContext):
     embed = discord.Embed(
         title="RPG系統通知",
-        description="正在開發中，預計完成時間：未知。",
+        description="正在開發中，預計完成時間：未知。\n如果你想要提前收到測試通知\n請點擊這個文字加入我們[測試群組](https://discord.gg/4GE3FpR8rH)",
         color=discord.Color.red()
     )
     embed.set_footer(text="很抱歉無法使用該指令")
