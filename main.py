@@ -700,12 +700,11 @@ async def on_ready():
     
     init_db()
 
-
-@bot.slash_command(name="invite", description="生成机器人的邀请链接")
+@bot.slash_command(name="invite", description="生成幽幽子的邀請鏈接，邀她共舞於你的伺服器")
 async def invite(ctx: discord.ApplicationContext):
     if not bot.user:
         await ctx.respond(
-            "抱歉，无法生成邀请链接，机器人尚未正确启动。",
+            "哎呀～幽幽子的靈魂似乎尚未降臨此處，請稍後再試哦。",
             ephemeral=True
         )
         return
@@ -725,19 +724,28 @@ async def invite(ctx: discord.ApplicationContext):
     invite_url = f"https://discord.com/oauth2/authorize?{urlencode(query)}"
     
     embed = discord.Embed(
-        title="邀请 幽幽子 到你的服务器",
+        title="邀請幽幽子降臨你的伺服器",
         description=(
-            "探索与幽幽子的专属互动，感受她的优雅与神秘。\n"
-            f"✨ [点击这里邀请幽幽子]({invite_url}) ✨"
+            "幽幽子輕拂櫻花，緩緩飄至你的身旁。\n"
+            "與她共賞生死輪迴，品味片刻寧靜吧～\n\n"
+            f"🌸 **[點此邀請幽幽子]({invite_url})** 🌸"
         ),
-        color=discord.Color.purple()
+        color=discord.Color.from_rgb(255, 182, 193)
     )
+    
     if bot.user.avatar:
         embed.set_thumbnail(url=bot.user.display_avatar.url)
-    embed.set_footer(text="感谢您的支持，让幽幽子加入您的服务器！")
+    
+    yuyuko_quotes = [
+        "生與死不過一線之隔，何不輕鬆以對？",
+        "櫻花散落之時，便是與我共舞之刻。",
+        "肚子餓了呢～有沒有好吃的供品呀？"
+    ]
+    embed.set_footer(text=random.choice(yuyuko_quotes))
+    
     await ctx.respond(embed=embed)
 
-@bot.slash_command(name="blackjack", description="開啟21點遊戲")
+@bot.slash_command(name="blackjack", description="幽幽子與你共舞一場21點遊戲～")
 async def blackjack(ctx: discord.ApplicationContext, bet: float):
     bet = round(bet, 2)
     
@@ -779,25 +787,24 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             save_json("invalid_bet_count.json", invalid_bet_count)
 
             await ctx.respond(embed=discord.Embed(
-                title="你的帳戶已被清空！",
-                description="由於多次嘗試以 0 或負數進行賭注，你的餘額已被清空！",
+                title="🌸 靈魂的代價 🌸",
+                description="哎呀～你多次試圖用無效的賭注欺騙幽幽子，你的幽靈幣已被清空了哦！",
                 color=discord.Color.red()
             ))
             return
 
         await ctx.respond(embed=discord.Embed(
-            title="無效的賭注！",
-            description="賭注金額必須大於 0！",
+            title="🌸 無效的賭注 🌸",
+            description="嘻嘻，賭注必須大於 0 哦～別想騙過幽幽子的眼睛！",
             color=discord.Color.red()
         ))
         return
 
     user_balance = round(balance.get(guild_id, {}).get(user_id, 0), 2)
-
     if user_balance < bet:
         await ctx.respond(embed=discord.Embed(
-            title="餘額不足！",
-            description=f"你當前的餘額是 {user_balance:.2f} 幽靈幣，無法下注 {bet:.2f} 幽靈幣。",
+            title="🌸 幽靈幣不足 🌸",
+            description=f"你的幽靈幣只有 {user_balance:.2f}，無法下注 {bet:.2f} 哦～再去收集一些吧！",
             color=discord.Color.red()
         ))
         return
@@ -842,6 +849,8 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     save_json("blackjack_data.json", blackjack_data)
 
     async def auto_settle():
+        blackjack_data = load_json("blackjack_data.json")
+        player_cards = blackjack_data[guild_id][user_id]["player_cards"]
         player_total = calculate_hand(player_cards)
         if player_total == 21:
             blackjack_data[guild_id][user_id]["game_status"] = "ended"
@@ -852,8 +861,8 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             save_json("balance.json", balance)
 
             await ctx.respond(embed=discord.Embed(
-                title="黑傑克！你獲勝了！",
-                description=f"你的手牌: {player_cards}\n你贏得了 {reward:.2f} 幽靈幣！",
+                title="🌸 黑傑克！靈魂的勝利！🌸",
+                description=f"你的手牌: {player_cards}\n幽幽子為你獻上 {reward:.2f} 幽靈幣的祝福～",
                 color=discord.Color.gold()
             ))
             return True
@@ -863,21 +872,23 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
         return
 
     embed = discord.Embed(
-        title="21點遊戲開始！",
-        description=(f"你下注了 **{bet:.2f} 幽靈幣**\n"
-                     f"你的初始手牌: {player_cards} (總點數: {calculate_hand(player_cards)})\n"
-                     f"莊家的明牌: {dealer_cards[0]}"),
-        color=discord.Color.from_rgb(204, 0, 51)
+        title="🌸 幽幽子的21點遊戲開始！🌸",
+        description=(
+            f"你下注了 **{bet:.2f} 幽靈幣**，讓我們共舞一場吧～\n\n"
+            f"你的初始手牌: {player_cards} (總點數: {calculate_hand(player_cards)})\n"
+            f"幽幽子的明牌: {dealer_cards[0]}"
+        ),
+        color=discord.Color.from_rgb(255, 182, 193)
     )
-    embed.set_footer(text="選擇你的操作！")
+    embed.set_footer(text="選擇你的命運吧～")
 
-    class BlackjackButtons(discord.ui.View):
+    class BlackjackButtons(View):
         def __init__(self, deck):
             super().__init__()
             self.deck = deck
 
         @discord.ui.button(label="抽牌 (Hit)", style=discord.ButtonStyle.primary)
-        async def hit(self, button: discord.ui.Button, interaction: discord.Interaction):
+        async def hit(self, button: Button, interaction: Interaction):
             guild_id = str(interaction.guild.id)
             user_id = str(interaction.user.id)
             
@@ -885,16 +896,17 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             player_cards = blackjack_data[guild_id][user_id]["player_cards"]
 
             player_cards.append(self.deck.pop())
-
             blackjack_data[guild_id][user_id]["player_cards"] = player_cards
             save_json("blackjack_data.json", blackjack_data)
 
             player_total = calculate_hand(player_cards)
 
             if player_total > 21:
+                blackjack_data[guild_id][user_id]["game_status"] = "ended"
+                save_json("blackjack_data.json", blackjack_data)
                 await interaction.response.edit_message(embed=discord.Embed(
-                    title="殘念，你爆了！",
-                    description=f"你的手牌: {player_cards}\n點數總計: {player_total}",
+                    title="🌸 哎呀，靈魂爆掉了！🌸",
+                    description=f"你的手牌: {player_cards}\n點數總計: {player_total}\n下次再來挑戰幽幽子吧～",
                     color=discord.Color.red()
                 ), view=None)
                 return
@@ -903,17 +915,21 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
                 return
 
             await interaction.response.edit_message(embed=discord.Embed(
-                title="你抽了一張牌！",
+                title="🌸 你抽了一張牌！🌸",
                 description=f"你的手牌: {player_cards}\n目前點數: {player_total}",
-                color=discord.Color.from_rgb(204, 0, 51)
+                color=discord.Color.from_rgb(255, 182, 193)
             ), view=self)
 
         @discord.ui.button(label="停牌 (Stand)", style=discord.ButtonStyle.danger)
-        async def stand(self, button: discord.ui.Button, interaction: discord.Interaction):
+        async def stand(self, button: Button, interaction: Interaction):
             guild_id = str(interaction.guild.id)
             user_id = str(interaction.user.id)
             blackjack_data = load_json("blackjack_data.json")
+            balance = load_json("balance.json")
+
+            player_cards = blackjack_data[guild_id][user_id]["player_cards"]
             dealer_cards = blackjack_data[guild_id][user_id]["dealer_cards"]
+            bet = blackjack_data[guild_id][user_id]["bet"]
 
             blackjack_data[guild_id][user_id]["game_status"] = "ended"
             save_json("blackjack_data.json", blackjack_data)
@@ -930,21 +946,30 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
                 balance[guild_id][user_id] += reward
                 save_json("balance.json", balance)
                 embed = discord.Embed(
-                    title="恭賀，你贏了！",
-                    description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}\n你的獎勵: {reward:.2f} 幽靈幣",
+                    title="🌸 靈魂的勝利！🌸",
+                    description=f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n你贏得了 {reward:.2f} 幽靈幣～",
                     color=discord.Color.gold()
+                )
+            elif player_total == dealer_total:
+                reward = round(bet, 2)
+                balance[guild_id][user_id] += reward
+                save_json("balance.json", balance)
+                embed = discord.Embed(
+                    title="🌸 平手，靈魂的平衡～🌸",
+                    description=f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n退還賭注: {reward:.2f} 幽靈幣",
+                    color=discord.Color.from_rgb(255, 182, 193)
                 )
             else:
                 embed = discord.Embed(
-                    title="殘念，莊家贏了！",
-                    description=f"你的手牌: {player_cards}\n莊家的手牌: {dealer_cards}",
+                    title="🌸 殘念，幽幽子贏了！🌸",
+                    description=f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n下次再來挑戰吧～",
                     color=discord.Color.red()
                 )
 
             await interaction.response.edit_message(embed=embed, view=None)
-            
+
         @discord.ui.button(label="雙倍下注 (Double Down)", style=discord.ButtonStyle.success)
-        async def double_down(self, button: discord.ui.Button, interaction: discord.Interaction):
+        async def double_down(self, button: Button, interaction: Interaction):
             guild_id = str(interaction.guild.id)
             user_id = str(interaction.user.id)
             blackjack_data = load_json("blackjack_data.json")
@@ -952,8 +977,8 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
 
             if blackjack_data[guild_id][user_id]["double_down_used"]:
                 await interaction.response.edit_message(embed=discord.Embed(
-                    title="無法雙倍下注！",
-                    description="你已經使用過雙倍下注！",
+                    title="🌸 無法再次挑戰命運！🌸",
+                    description="你已經使用過雙倍下注了哦～",
                     color=discord.Color.red()
                 ), view=None)
                 return
@@ -963,8 +988,8 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
 
             if user_balance < bet:
                 await interaction.response.edit_message(embed=discord.Embed(
-                    title="餘額不足！",
-                    description="你的餘額不足，無法使用雙倍下注！",
+                    title="🌸 幽靈幣不足！🌸",
+                    description="你的幽靈幣不足，無法雙倍下注哦～",
                     color=discord.Color.red()
                 ), view=None)
                 return
@@ -978,19 +1003,20 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
             player_cards.append(self.deck.pop())
             player_total = calculate_hand(player_cards)
 
+            blackjack_data[guild_id][user_id]["player_cards"] = player_cards
             blackjack_data[guild_id][user_id]["game_status"] = "ended"
             save_json("balance.json", balance)
             save_json("blackjack_data.json", blackjack_data)
 
             embed = discord.Embed(
-                title="雙倍下注！",
+                title="🌸 雙倍下注，挑戰命運！🌸",
                 description=f"你的手牌: {player_cards} (總點數: {player_total})\n賭注翻倍為 {blackjack_data[guild_id][user_id]['bet']:.2f} 幽靈幣",
                 color=discord.Color.gold()
             )
 
             if player_total > 21:
-                embed.title = "你爆了！"
-                embed.description = f"你的手牌: {player_cards}\n總點數: {player_total}"
+                embed.title = "🌸 哎呀，靈魂爆掉了！🌸"
+                embed.description = f"你的手牌: {player_cards}\n總點數: {player_total}\n下次再來挑戰幽幽子吧～"
                 embed.color = discord.Color.red()
                 await interaction.response.edit_message(embed=embed, view=None)
                 return
@@ -1004,51 +1030,51 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
                 reward = blackjack_data[guild_id][user_id]["bet"] * 2
                 balance[guild_id][user_id] += reward
                 save_json("balance.json", balance)
-                embed.title = "恭賀，你贏了！"
-                embed.description = f"你的手牌: {player_cards}\n莊家手牌: {dealer_cards}\n獎勵: {reward:.2f} 幽靈幣"
+                embed.title = "🌸 靈魂的勝利！🌸"
+                embed.description = f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n你�赢得了 {reward:.2f} 幽靈幣～"
                 embed.color = discord.Color.gold()
             elif player_total == dealer_total:
                 reward = blackjack_data[guild_id][user_id]["bet"]
                 balance[guild_id][user_id] += reward
                 save_json("balance.json", balance)
-                embed.title = "平手！"
-                embed.description = f"你的手牌: {player_cards}\n莊家手牌: {dealer_cards}\n退還賭注: {reward:.2f} 幽靈幣"
-                embed.color = discord.Color.from_rgb(204, 0, 51)
+                embed.title = "🌸 平手，靈魂的平衡～🌸"
+                embed.description = f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n退還賭注: {reward:.2f} 幽靈幣"
+                embed.color = discord.Color.from_rgb(255, 182, 193)
             else:
-                embed.title = "殘念，莊家贏了！"
-                embed.description = f"你的手牌: {player_cards}\n莊家手牌: {dealer_cards}"
+                embed.title = "🌸 殘念，幽幽子贏了！🌸"
+                embed.description = f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n下次再來挑戰吧～"
                 embed.color = discord.Color.red()
 
             await interaction.response.edit_message(embed=embed, view=None)
 
     await ctx.respond(embed=embed, view=BlackjackButtons(deck))
 
-@bot.slash_command(name="about-me", description="關於機器人")
+@bot.slash_command(name="about-me", description="關於幽幽子的一切～")
 async def about_me(ctx: discord.ApplicationContext):
     if not bot.user:
         await ctx.respond(
-            "抱歉，無法提供關於機器人的資訊，目前機器人尚未正確啟動。",
+            "哎呀～幽幽子的靈魂似乎飄散了，暫時無法現身哦。",
             ephemeral=True
         )
         return
 
     current_hour = datetime.now().hour
     if 5 <= current_hour < 12:
-        greeting = "早上好"
+        greeting = "清晨的櫻花正綻放"
     elif 12 <= current_hour < 18:
-        greeting = "下午好"
+        greeting = "午後的微風輕拂花瓣"
     else:
-        greeting = "晚上好"
+        greeting = "夜晚的亡魂低語陣陣"
 
     embed = discord.Embed(
-        title="👋 關於幽幽子機器人",
+        title="🌸 關於幽幽子",
         description=(
             f"{greeting}，{ctx.author.mention}！\n\n"
-            "我是你的好夥伴幽幽子，專門來協助你完成各種有趣的事務。\n"
-            "使用 `/` 指令來探索我的功能，若需要更詳細的幫助，請輸入 `/help` 查看。\n\n"
-            "希望我能成為你的好助手！"
+            "我是西行寺幽幽子，亡魂之主，櫻花下的舞者。\n"
+            "來吧，使用 `/` 指令與我共舞，探索生與死的奧秘～\n"
+            "若迷失方向，不妨試試 `/help`，我會輕聲指引你。"
         ),
-        color=discord.Color.from_rgb(219, 112, 147),
+        color=discord.Color.from_rgb(255, 182, 193),
         timestamp=datetime.now()
     )
 
@@ -1056,33 +1082,41 @@ async def about_me(ctx: discord.ApplicationContext):
         embed.set_thumbnail(url=bot.user.display_avatar.url)
 
     embed.add_field(
-        name="🤖 機器人資訊",
+        name="👻 幽幽子的秘密",
         value=(
             f"- **名稱：** {bot.user.name}\n"
-            f"- **ID：** {bot.user.id}\n"
-            f"- **開發語言：** Python + Pycord\n"
-            f"- **狀態：** 在綫"
+            f"- **靈魂編號：** {bot.user.id}\n"
+            f"- **存在形式：** Python + Pycord\n"
+            f"- **狀態：** 飄浮中～"
         ),
         inline=False
     )
 
+    # 開發者資訊字段
     embed.add_field(
-        name="🛠️ 開發者資訊",
+        name="🖌️ 召喚我之人",
         value=(
-            "- **開發者：** Miya253(Shiroko253)\n"
-            "- [Project-Zero](https://github.com/Shiroko253/Project-zero)"
+            "- **靈魂契約者：** Miya253 (Shiroko253)\n"
+            "- **[契約之地](https://github.com/Shiroko253/Project-zero)**"
         ),
         inline=False
     )
 
-    embed.set_footer(text="感謝你的支持，祝你使用愉快！")
+    yuyuko_quotes = [
+        "櫻花飄落之際，生死不過一念。",
+        "有沒有好吃的呀？我有點餓了呢～",
+        "與我共舞吧，別讓靈魂孤單。"
+    ]
+    embed.set_footer(text=random.choice(yuyuko_quotes))
 
     await ctx.respond(embed=embed)
 
-@bot.slash_command(name="balance", description="查询用户余额")
+@bot.slash_command(name="balance", description="幽幽子為你窺探幽靈幣的數量～")
 @track_balance_json
 async def balance(ctx: discord.ApplicationContext):
     try:
+        await ctx.defer(ephemeral=False)
+
         user_balance = load_json("balance.json")
         guild_id = str(ctx.guild.id)
         user_id = str(ctx.user.id)
@@ -1092,21 +1126,46 @@ async def balance(ctx: discord.ApplicationContext):
 
         balance = user_balance[guild_id].get(user_id, 0)
 
-        embed = discord.Embed(
-            title="💰 幽靈幣餘額查詢",
-            description=(
-                f"**{ctx.user.display_name}** 在此群组的幽靈幣餘額为：\n\n"
-                f"**{balance} 幽靈幣**"
-            ),
-            color=discord.Color.from_rgb(219, 112, 147)
-        )
-        embed.set_footer(text="感谢使用幽靈幣系統！")
+        yuyuko_comments = [
+            "嘻嘻，你的幽靈幣數量真有趣呢～",
+            "這些幽靈幣，會帶來什麼樣的命運呢？",
+            "靈魂與幽靈幣的交響曲，幽幽子很喜歡哦～",
+            "你的幽靈幣閃閃發光，櫻花都忍不住飄落了～",
+            "這樣的數量，會讓幽靈們羨慕吧？"
+        ]
 
-        await ctx.respond(embed=embed)
+        embed = discord.Embed(
+            title="🌸 幽幽子的幽靈幣窺探 🌸",
+            description=(
+                f"**{ctx.user.display_name}**，讓幽幽子為你揭示吧～\n\n"
+                f"在這片靈魂之地，你的幽靈幣餘額為：\n"
+                f"**{balance:.2f} 幽靈幣**"
+            ),
+            color=discord.Color.from_rgb(255, 182, 193)
+        )
+        embed.set_footer(text=random.choice(yuyuko_comments))
+
+        await ctx.respond(embed=embed, ephemeral=False)
 
     except Exception as e:
         logging.error(f"Unexpected error in balance command: {e}")
-        await ctx.respond(f"發生錯誤：{e}", ephemeral=True)
+        if isinstance(e, discord.errors.NotFound) and e.code == 10062:
+            logging.warning("Interaction expired in balance command, cannot respond.")
+        else:
+            try:
+                yuyuko_error_comments = [
+                    "下次再試試吧～靈魂的波動有時會捉弄我們哦～"
+                ]
+                await ctx.respond(
+                    embed=discord.Embed(
+                        title="🌸 哎呀，靈魂出錯了！🌸",
+                        description=f"幽幽子試圖窺探你的幽靈幣時，發生了一點小意外…\n錯誤：{e}",
+                        color=discord.Color.red()
+                    ).set_footer(text=random.choice(yuyuko_error_comments)),
+                    ephemeral=True
+                )
+            except discord.errors.NotFound:
+                logging.warning("Failed to respond due to expired interaction.")
 
 @bot.slash_command(name="balance_top", description="查看幽靈幣排行榜")
 @track_balance_json
@@ -1996,74 +2055,128 @@ async def time_command(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-@bot.slash_command(name="ping", description="測試訊息讀取和返回延遲")
+@bot.slash_command(name="ping", description="幽幽子為你測試與靈界通訊的延遲～")
 async def ping(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="📊 延遲測試中...",
-        description="正在測試 Discord API 每秒讀取訊息和返回延遲...",
-        color=discord.Color.blurple()
-    )
-
+    openai.api_base = API_URL
+    openai.api_key = os.getenv('CHATANYWHERE_API')
     await interaction.response.defer()
+
+    embed = discord.Embed(
+        title="🌸 幽幽子的靈界通訊測試 🌸",
+        description="幽幽子正在與靈界通訊，測試延遲中…請稍候～",
+        color=discord.Color.from_rgb(255, 182, 193)
+    )
+    yuyuko_comments = [
+        "靈魂的波動正在傳遞，稍等一下哦～",
+        "嘻嘻，靈界的回應有時會慢一點呢～",
+        "櫻花飄落的速度，比這通訊還快吧？"
+    ]
+    embed.set_footer(text=random.choice(yuyuko_comments))
+
     message = await interaction.followup.send(embed=embed)
 
-    iterations = 10
+    iterations = 3
     total_time = 0
+    delays = []
 
     for i in range(iterations):
         start_time = time.time()
-        await message.edit(embed=discord.Embed(
-            title="📊 延遲測試中...",
-            description=f"正在測試中... 第 {i + 1}/{iterations} 次",
-            color=discord.Color.blurple()
-        ))
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You are a simple ping tester."},
+                    {"role": "user", "content": "Ping!"}
+                ],
+                max_tokens=10
+            )
+        except Exception as e:
+            embed = discord.Embed(
+                title="🌸 哎呀，靈界通訊失敗了！🌸",
+                description=f"幽幽子試圖與靈界通訊時，發生了一點小意外…\n錯誤：{e}",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text="下次再試試吧～")
+            await message.edit(embed=embed)
+            return
+
         end_time = time.time()
-        total_time += (end_time - start_time) * 1000
+        delay = (end_time - start_time) * 1000
+        delays.append(delay)
+        total_time += delay
+
+        if delay <= 500:
+            embed_color = discord.Color.teal()
+        elif 500 < delay <= 1000:
+            embed_color = discord.Color.gold()
+        else:
+            embed_color = discord.Color.red()
+
+        yuyuko_comments_progress = [
+            f"第 {i + 1} 次通訊完成，靈魂的回應真快呢～",
+            f"靈界第 {i + 1} 次回應，櫻花都忍不住飄落了～",
+            f"第 {i + 1} 次通訊，靈魂的波動真美妙～"
+        ]
+        embed = discord.Embed(
+            title="🌸 幽幽子的靈界通訊測試 🌸",
+            description=(
+                f"正在與靈界通訊… 第 {i + 1}/{iterations} 次\n\n"
+                f"**本次延遲**: `{delay:.2f} 毫秒`\n"
+                f"**平均延遲**: `{total_time / (i + 1):.2f} 毫秒`"
+            ),
+            color=embed_color
+        )
+        embed.set_footer(text=yuyuko_comments_progress[i])
+        await message.edit(embed=embed)
+        await asyncio.sleep(1)
 
     avg_delay = total_time / iterations
-
-    if avg_delay <= 100:
+    if avg_delay <= 500:
         embed_color = discord.Color.teal()
-    elif 100 < avg_delay <= 200:
+        yuyuko_comments_final = [
+            "靈界的通訊真順暢，靈魂的舞步都輕快起來了～",
+            "這樣的延遲，連幽靈都會讚嘆哦～",
+            "嘻嘻，靈界與你的靈魂完美共鳴了～"
+        ]
+    elif 500 < avg_delay <= 1000:
         embed_color = discord.Color.gold()
+        yuyuko_comments_final = [
+            "通訊有點慢呢，靈魂的波動需要更多練習哦～",
+            "這樣的延遲，櫻花都等得有點不耐煩了～",
+            "靈界的回應有點遲，可能是幽靈在偷懶吧？"
+        ]
     else:
         embed_color = discord.Color.red()
+        yuyuko_comments_final = [
+            "哎呀，靈界的通訊太慢了，靈魂都快睡著了～",
+            "這樣的延遲，連櫻花都忍不住嘆息了～",
+            "靈界的回應太慢了，幽幽子都等得不耐煩了～"
+        ]
 
     result_embed = discord.Embed(
-        title="📊 延遲測試結果",
+        title="🌸 幽幽子的靈界通訊結果 🌸",
         description=(
             f"**WebSocket 延遲**: `{bot.latency * 1000:.2f} 毫秒`\n"
-            f"**Discord API 訊息編輯平均延遲**: `{avg_delay:.2f} 毫秒`"
+            f"**靈界通訊平均延遲**: `{avg_delay:.2f} 毫秒`\n\n"
+            f"詳細結果：\n"
+            f"第 1 次: `{delays[0]:.2f} 毫秒`\n"
+            f"第 2 次: `{delays[1]:.2f} 毫秒`\n"
+            f"第 3 次: `{delays[2]:.2f} 毫秒`"
         ),
         color=embed_color
     )
-    result_embed.set_footer(text="測試完成，數據僅供參考。")
+    result_embed.set_footer(text=random.choice(yuyuko_comments_final))
 
     await message.edit(embed=result_embed)
 
-class ServerInfoView(View):
-    def __init__(self, guild_icon_url):
-        super().__init__(timeout=180)
-        self.guild_icon_url = guild_icon_url
-
-    
-    @discord.ui.button(label="點擊獲取群組圖貼", style=discord.ButtonStyle.primary)
-    async def send_guild_icon(self, button: Button, interaction: Interaction):
-        try:
-            print(f"按鈕觸發成功, Guild Icon URL: {self.guild_icon_url}")
-            if self.guild_icon_url:
-                await interaction.response.send_message(self.guild_icon_url, ephemeral=True)
-            else:
-                await interaction.response.send_message("這個群組沒有圖像。", ephemeral=True)
-        except Exception as e:
-            print(f"按鈕互動錯誤: {e}")
-            await interaction.followup.send("發生錯誤，請稍後再試。", ephemeral=True)
-
-@bot.slash_command(name="server_info", description="獲取群組資訊")
+@bot.slash_command(name="server_info", description="幽幽子為你窺探群組的靈魂資訊～")
 async def server_info(interaction: Interaction):
     guild = interaction.guild
     if guild is None:
-        await interaction.response.send_message("這個指令只能在群組中使用。", ephemeral=True)
+        await interaction.response.send_message(
+            "哎呀～這個地方沒有靈魂聚集，無法窺探哦。請在群組中使用此指令～",
+            ephemeral=True
+        )
         return
 
     guild_name = guild.name
@@ -2074,21 +2187,67 @@ async def server_info(interaction: Interaction):
     created_at = f"<t:{int(guild.created_at.timestamp())}:F>"
     guild_icon_url = guild.icon.url if guild.icon else None
 
-    embed_color = guild.me.color if guild.me.color else discord.Color.blue()
+    embed = discord.Embed(
+        title="🌸 幽幽子窺探的群組靈魂 🌸",
+        description=(
+            f"我是西行寺幽幽子，亡魂之主，現在為你揭示群組「{guild_name}」的靈魂～\n"
+            "讓我們來看看這片土地的命運吧…"
+        ),
+        color=discord.Color.from_rgb(255, 182, 193)
+    )
 
-    embed = discord.Embed(title="群組資訊", color=embed_color)
-    embed.add_field(name="群組名字", value=guild_name, inline=False)
-    embed.add_field(name="群組ID", value=guild_id, inline=False)
-    embed.add_field(name="成員數量", value=f"{member_count} (機器人: {bot_count})", inline=True)
-    embed.add_field(name="身分組數量", value=role_count, inline=True)
-    embed.add_field(name="群組創建時間", value=created_at, inline=False)
+    embed.add_field(name="群組之名", value=guild_name, inline=False)
+    embed.add_field(name="靈魂聚集之地", value=guild_id, inline=False)
+    embed.add_field(name="靈魂數量", value=f"{member_count} (機械之魂: {bot_count})", inline=True)
+    embed.add_field(name="身份之數", value=role_count, inline=True)
+    embed.add_field(name="此地誕生之日", value=created_at, inline=False)
+
     if guild_icon_url:
         embed.set_thumbnail(url=guild_icon_url)
 
-    view = ServerInfoView(guild_icon_url)
+    yuyuko_quotes = [
+        "這片土地的靈魂真熱鬧…有沒有好吃的供品呀？",
+        "櫻花下的群組，靈魂們的命運真是迷人～",
+        "生與死的交界處，這裡的氣息讓我感到舒適呢。"
+    ]
+    embed.set_footer(text=random.choice(yuyuko_quotes))
+
+    view = View(timeout=180)
+    async def button_callback(interaction: Interaction):
+        try:
+            if guild_icon_url:
+                yuyuko_comments = [
+                    "這就是群組的靈魂之影～很美吧？",
+                    f"嘻嘻，我抓到了「{guild_name}」的圖像啦！",
+                    "這片土地的標誌，生與死的交界處真是迷人呢～"
+                ]
+                await interaction.response.send_message(
+                    f"{guild_icon_url}\n\n{random.choice(yuyuko_comments)}",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    "哎呀～這個群組沒有靈魂之影可看哦。",
+                    ephemeral=True
+                )
+        except Exception as e:
+            print(f"按鈕互動錯誤: {e}")
+            await interaction.response.send_message(
+                "哎呀，發生了一點小意外…稍後再試試吧～",
+                ephemeral=True
+            )
+
+    button = Button(
+        label="點擊獲取群組圖貼",
+        style=discord.ButtonStyle.primary,
+        emoji="🖼️"
+    )
+    button.callback = button_callback
+    view.add_item(button)
+
     await interaction.response.send_message(embed=embed, view=view)
 
-@bot.slash_command(name="user_info", description="获取用户的基本信息")
+@bot.slash_command(name="user_info", description="幽幽子為你窺探用戶的靈魂資訊～")
 async def userinfo(ctx: discord.ApplicationContext, user: discord.Member = None):
     user = user or ctx.author
 
@@ -2102,99 +2261,155 @@ async def userinfo(ctx: discord.ApplicationContext, user: discord.Member = None)
     job = user_config.get('job', '無職業')
     mp = user_config.get('MP', 0)
 
-    embed = discord.Embed(title="用户信息", color=discord.Color.from_rgb(255, 182, 193))
+    embed = discord.Embed(
+        title="🌸 幽幽子窺探的靈魂資訊 🌸",
+        description=(
+            f"我是西行寺幽幽子，亡魂之主，現在為你揭示 {user.mention} 的靈魂～\n"
+            "讓我們來看看這位旅人的命運吧…"
+        ),
+        color=discord.Color.from_rgb(255, 182, 193)
+    )
     embed.set_thumbnail(url=user.display_avatar.url)
 
-    embed.add_field(name="名称", value=f"{user.name}#{user.discriminator}", inline=True)
-    embed.add_field(name="ID", value=user.id, inline=True)
+    embed.add_field(name="名稱", value=f"{user.name}#{user.discriminator}", inline=True)
+    embed.add_field(name="靈魂編號", value=user.id, inline=True)
     embed.add_field(
-        name="账号创建日期",
+        name="靈魂誕生之日",
         value=user.created_at.replace(tzinfo=timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         inline=True
     )
 
     if isinstance(user, discord.Member):
-        embed.add_field(name="服务器昵称", value=user.nick or "无", inline=True)
+        embed.add_field(name="伺服器化名", value=user.nick or "無", inline=True)
         embed.add_field(
-            name="加入服务器日期",
-            value=user.joined_at.replace(tzinfo=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if user.joined_at else "无法获取",
+            name="加入此地之日",
+            value=user.joined_at.replace(tzinfo=timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if user.joined_at else "無法窺見",
             inline=True
         )
-        embed.add_field(name="最高角色", value=user.top_role.mention if user.top_role else "无", inline=True)
-        embed.add_field(name="Bot?", value="是" if user.bot else "否", inline=True)
+        embed.add_field(name="最高身份", value=user.top_role.mention if user.top_role else "無", inline=True)
+        embed.add_field(name="是機械之魂？", value="是" if user.bot else "否", inline=True)
     else:
-        embed.add_field(name="服务器昵称", value="用户不在当前服务器", inline=True)
-    
+        embed.add_field(name="伺服器化名", value="此魂不在當前之地", inline=True)
+
     work_embed = discord.Embed(
-        title="工作資訊",
+        title="💼 幽幽子觀察到的命運軌跡",
         color=discord.Color.from_rgb(135, 206, 250)
     )
     work_embed.add_field(
-        name="狀態",
-        value=f"💼 職業: {job}\n⏳ 冷卻時間: {work_cooldown}\n📊 壓力指數 (MP): {mp}/200",
+        name="命運狀態",
+        value=(
+            f"💼 職業: {job}\n"
+            f"⏳ 冷卻之時: {work_cooldown}\n"
+            f"📊 靈魂壓力 (MP): {mp}/200"
+        ),
         inline=False
     )
-    
-    await ctx.respond(embeds=[embed, work_embed])
 
-class FeedbackButtons(View):
-    def __init__(self, description: str = None):
-        super().__init__(timeout=None)
-        self.description = description if description else "未提供描述"
+    yuyuko_quotes = [
+        "靈魂的軌跡真是美麗啊…有沒有好吃的供品呢？",
+        "生與死不過一線之隔，珍惜當下吧～",
+        "這靈魂的顏色…嗯，適合配一朵櫻花！"
+    ]
+    embed.set_footer(text=random.choice(yuyuko_quotes))
 
-    @discord.ui.button(label="指令錯誤或無回應", style=discord.ButtonStyle.primary)
-    async def command_error(self, button: Button, interaction: discord.Interaction):
-        await self.handle_feedback(interaction, "指令錯誤或無回應")
+    view = discord.ui.View(timeout=180)
+    async def button_callback(interaction: discord.Interaction):
+        yuyuko_comments = [
+            f"這就是 {user.name} 的靈魂之影～很美吧？",
+            f"嘻嘻，{user.name} 的頭像被我抓到啦！",
+            f"這是 {user.name} 的模樣，生與死的交界處真是迷人呢～"
+        ]
+        await interaction.response.send_message(
+            f"{user.display_avatar.url}\n\n{random.choice(yuyuko_comments)}",
+            ephemeral=True
+        )
 
-    @discord.ui.button(label="機器人訊息問題", style=discord.ButtonStyle.primary)
-    async def message_issue(self, button: Button, interaction: discord.Interaction):
-        await self.handle_feedback(interaction, "機器人訊息問題")
+    button = discord.ui.Button(
+        label="獲取頭像",
+        style=discord.ButtonStyle.primary,
+        emoji="🖼️"
+    )
+    button.callback = button_callback
+    view.add_item(button)
 
-    @discord.ui.button(label="迷你遊戲系統錯誤", style=discord.ButtonStyle.primary)
-    async def minigame_error(self, button: Button, interaction: discord.Interaction):
-        await self.handle_feedback(interaction, "迷你遊戲系統錯誤")
+    await ctx.respond(embeds=[embed, work_embed], view=view)
 
-    @discord.ui.button(label="其他問題", style=discord.ButtonStyle.primary)
-    async def other_issue(self, button: Button, interaction: discord.Interaction):
-        await self.handle_feedback(interaction, "其他問題")
+@bot.slash_command(name="feedback", description="幽幽子聆聽你的靈魂之聲～提交反饋吧！")
+async def feedback(ctx: discord.ApplicationContext, description: str = None):
+    """Command to collect user feedback with category buttons."""
+    view = View(timeout=None)
 
-    async def handle_feedback(self, interaction: discord.Interaction, category: str):
-        feedback_channel_id = 1308316531444158525  # 替換為你的反饋頻道ID
+    async def handle_feedback(interaction: discord.Interaction, category: str):
+        feedback_channel_id = 1308316531444158525
         feedback_channel = bot.get_channel(feedback_channel_id)
 
         if feedback_channel is None:
             await interaction.response.send_message(
-                "反饋頻道尚未正確設置，請聯繫作者。", ephemeral=True
+                "哎呀～靈魂的回音無法傳達，反饋之地尚未設置好呢…請聯繫作者哦～",
+                ephemeral=True
             )
             return
 
         embed = discord.Embed(
-            title="收到新的反饋",
+            title="🌸 幽幽子收到的靈魂之聲 🌸",
             description=(
                 f"**分類:** {category}\n"
-                f"**用戶:** {interaction.user.mention}\n"
-                f"**描述:** {self.description}"
+                f"**靈魂:** {interaction.user.mention}\n"
+                f"**回音:** {description if description else '未提供描述'}"
             ),
             color=discord.Color.from_rgb(255, 182, 193)
         )
         embed.timestamp = discord.utils.utcnow()
 
         await feedback_channel.send(embed=embed)
-        await interaction.response.send_message("感謝您的反饋！", ephemeral=True)
+        yuyuko_thanks = [
+            "感謝你的靈魂之聲，我會好好聆聽的～",
+            "嘻嘻，你的回音已傳到我的耳邊，謝謝你哦～",
+            "靈魂的低語真美妙，感謝你的反饋！"
+        ]
+        await interaction.response.send_message(
+            random.choice(yuyuko_thanks),
+            ephemeral=True
+        )
 
-@bot.slash_command(name="feedback", description="提交您的反饋或建議！")
-async def feedback(ctx: discord.ApplicationContext, description: str = None):
-    """Command to collect user feedback with category buttons."""
+    async def command_error_callback(interaction: discord.Interaction):
+        await handle_feedback(interaction, "指令錯誤或無回應")
+
+    button1 = Button(label="指令錯誤或無回應", style=discord.ButtonStyle.primary)
+    button1.callback = command_error_callback
+    view.add_item(button1)
+
+    async def message_issue_callback(interaction: discord.Interaction):
+        await handle_feedback(interaction, "機器人訊息問題")
+
+    button2 = Button(label="機器人訊息問題", style=discord.ButtonStyle.primary)
+    button2.callback = message_issue_callback
+    view.add_item(button2)
+
+    async def minigame_error_callback(interaction: discord.Interaction):
+        await handle_feedback(interaction, "迷你遊戲系統錯誤")
+
+    button3 = Button(label="迷你遊戲系統錯誤", style=discord.ButtonStyle.primary)
+    button3.callback = minigame_error_callback
+    view.add_item(button3)
+
+    async def other_issue_callback(interaction: discord.Interaction):
+        await handle_feedback(interaction, "其他問題")
+
+    button4 = Button(label="其他問題", style=discord.ButtonStyle.primary)
+    button4.callback = other_issue_callback
+    view.add_item(button4)
+
     if description:
         await ctx.respond(
-            f"您提供的反饋描述：{description}\n請使用以下按鈕選擇您的反饋類別：",
-            view=FeedbackButtons(description=description),
+            f"你的靈魂之聲我聽到了～「{description}」\n請選擇以下類別，讓我更好地理解你的心意吧：",
+            view=view,
             ephemeral=True
         )
     else:
         await ctx.respond(
-            "請使用以下按鈕選擇您的反饋類別，並補充具體描述：",
-            view=FeedbackButtons(),
+            "幽幽子在此聆聽你的心聲～請選擇以下類別，並補充具體描述哦：",
+            view=view,
             ephemeral=True
         )
 
