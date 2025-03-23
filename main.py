@@ -24,7 +24,6 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from urllib.parse import urlencode
 from filelock import FileLock
-from omikuji import draw_lots
 from responses import food_responses, death_responses, life_death_responses, self_responses, friend_responses, maid_responses, mistress_responses, reimu_responses, get_random_response
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from functools import wraps
@@ -2838,56 +2837,24 @@ async def fish_back(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("❌ 你還沒有捕到任何魚！", ephemeral=True)
 
-def is_on_cooldown(user_id, cooldown_hours):
-    user_data = load_yaml("config_user.yml")
-    guild_id = str(user_id.guild.id)
-    user_id = str(user_id.id)
-
-    if guild_id in user_data and user_id in user_data[guild_id]:
-        last_used = datetime.fromisoformat(user_data[guild_id][user_id].get("draw_cooldown", "1970-01-01T00:00:00"))
-        now = datetime.now()
-        cooldown_period = timedelta(hours=cooldown_hours)
-        if now < last_used + cooldown_period:
-            remaining = last_used + cooldown_period - now
-            remaining_time = f"{remaining.seconds // 3600}小時 {remaining.seconds % 3600 // 60}分鐘"
-            return True, remaining_time
-
-    return False, None
-
-def update_cooldown(user_id):
-    user_data = load_yaml("config_user.yml")
-    guild_id = str(user_id.guild.id)
-    user_id = str(user_id.id)
-
-    if guild_id not in user_data:
-        user_data[guild_id] = {}
-    if user_id not in user_data[guild_id]:
-        user_data[guild_id][user_id] = {}
-
-    user_data[guild_id][user_id]["draw_cooldown"] = datetime.now().isoformat()
-    save_yaml("config_user.yml", user_data)
-
-@bot.slash_command(name="draw_lots", description="抽取御神抽籤")
+@bot.slash_command(name="draw_lots", description="查看御神籤功能的最新公告")
 async def draw_lots_command(interaction: discord.Interaction):
-    cooldown_hours = 5
-    user_id = interaction.user
-    
-    on_cooldown, remaining_time = is_on_cooldown(user_id, cooldown_hours)
-    
-    if on_cooldown:
-        await interaction.response.send_message(f"你還在冷卻中，剩餘時間：{remaining_time}", ephemeral=True)
-    else:
-        await interaction.response.defer()
-        result_text, color = draw_lots()
-        
-        embed = discord.Embed(
-            title="🎋 抽籤結果 🎋",
-            description=result_text,
-            color=color
-        )
-        
-        await interaction.followup.send(embed=embed)
-        update_cooldown(user_id)
+    user_name = interaction.user.display_name
+
+    embed = discord.Embed(
+        title="📢 御神籤功能停用公告 📢",
+        description=(
+            f"很抱歉，**{user_name}**，\n"
+            "在今日，我們 Discord Bot 幽幽子的作者，也就是 Miya253，準備停用在幽幽子上的御神籤功能。\n\n"
+            "如果您有抽籤需求，請使用以下鏈接邀請 **博麗靈夢**：\n"
+            "[點擊此訊息邀請 博麗靈夢](https://discord.com/oauth2/authorize?client_id=1352316233772437630&permissions=8&integration_type=0&scope=bot)\n\n"
+            "以上，很抱歉未能為用戶們提供最好的抽籤體驗。"
+        ),
+        color=discord.Color.red()
+    )
+    embed.set_footer(text="感謝您的理解與支持！")
+
+    await interaction.response.send_message(embed=embed, ephemeral=False)
 
 @bot.slash_command(name="quiz", description="進行問答挑戰！")
 async def quiz(ctx: discord.ApplicationContext):
@@ -2963,65 +2930,107 @@ async def rpg_start(ctx: discord.ApplicationContext):
     embed.set_footer(text="很抱歉無法使用該指令")
     await ctx.respond(embed=embed)
 
-@bot.slash_command(name="help", description="显示所有可用指令")
+@bot.slash_command(name="help", description="幽幽子為你介紹白玉樓的指令哦～")
 async def help(ctx: discord.ApplicationContext):
+    await ctx.defer(ephemeral=False)
+
+    yuyuko_comments = [
+        "嘻嘻，這些指令很有趣吧？快來試試看～",
+        "靈魂的指引就在這裡，選擇你喜歡的吧～",
+        "櫻花飄落時，指令的秘密也會顯現哦～",
+        "這些指令，都是幽幽子精心準備的呢～",
+        "來吧，讓我們一起探索這些指令的樂趣～",
+        "白玉樓的風鈴響起，指令的旋律也隨之而來～",
+        "靈魂的舞步，與這些指令共鳴吧～"
+    ]
+
     embed_test = discord.Embed(
-        title="⚠️ 測試員指令",
-        description="> `shutdown` - 關閉機器人\n> `restart` - 重啓機器人\n`addmoney` - 添加用戶幽靈幣\n`remove` - 移除用戶的幽靈幣",
-        color=discord.Color.orange()
+        title="⚠️ 幽幽子的測試員密語 ⚠️",
+        description=(
+            "這些是給測試員的特別指令，靈魂的試驗場哦～\n\n"
+            "> `shutdown` - 讓白玉樓的燈火暫時 關閉機器人，讓幽幽子休息一下吧～\n"
+            "> `restart` - 重啟機器人，靈魂需要一點新鮮空氣呢～\n"
+            "> `addmoney` - 為用戶添加幽靈幣，靈魂的財富增加啦！\n"
+            "> `remove` - 移除用戶的幽靈幣，哎呀，靈魂的財富減少了呢～"
+        ),
+        color=discord.Color.from_rgb(255, 182, 193)
     )
     embed_economy = discord.Embed(
-        title="💸 經濟系統",
+        title="💸 幽幽子的幽靈幣經濟 💸",
         description=(
-        "> `balance` - 用戶餘額\n> `choose_job` - 選擇職業\n> `work` - 工作\n> `pay` - 轉賬\n"
-        "> `reset_job` - 重置你的職業\n`balance_top - 查看經濟排行榜`"),
+            "在白玉樓，幽靈幣可是很重要的哦～快來賺取你的財富吧！\n\n"
+            "> `balance` - 讓幽幽子幫你窺探你的幽靈幣餘額～\n"
+            "> `choose_job` - 選擇一份職業，靈魂也需要工作哦～\n"
+            "> `work` - 努力工作，賺取更多的幽靈幣吧！\n"
+            "> `pay` - 轉賬給其他靈魂，分享你的財富吧～\n"
+            "> `reset_job` - 重置你的職業，換個新身份吧～\n"
+            "> `balance_top` - 查看經濟排行榜，看看誰是白玉樓最富有的靈魂！"
+        ),
         color=discord.Color.from_rgb(255, 182, 193)
     )
     embed_admin = discord.Embed(
-        title="🔒 管理員指令",
+        title="🔒 幽幽子的管理權杖 🔒",
         description=(
-            "> `ban` - 封鎖用戶\n> `kick` - 踢出用戶\n"
-            "> `addmoney` - 添加金錢\n> `removemoney` - 移除金錢\n"
-            "> `start_giveaway` - 開啓抽獎\n> `mute` - 禁言某位成員\n"
-            "> `unmute` - 解除某位成員禁言"
+            "這些是指令是給管理員的，靈魂的秩序由你來維護哦～\n\n"
+            "> `ban` - 封鎖用戶，讓他們離開白玉樓吧！\n"
+            "> `kick` - 踢出用戶，給他們一點小教訓～\n"
+            "> `start_giveaway` - 開啟抽獎，靈魂們都期待著呢！\n"
+            "> `mute` - 禁言某位成員，讓他們安靜一會兒～\n"
+            "> `unmute` - 解除禁言，讓靈魂的聲音再次響起吧～"
         ),
-        color=discord.Color.from_rgb(0, 51, 102)
+        color=discord.Color.from_rgb(255, 182, 193)
     )
     embed_common = discord.Embed(
-        title="🎉 普通指令",
+        title="🎉 幽幽子的日常樂趣 🎉",
         description=(
-            "> `time` - 未活動的待機時間顯示\n> `ping` - 顯示機器人的回復延遲\n"
-            "> `server_info` - 獲取伺服器資訊\n> `user_info` - 獲取用戶資訊\n"
-            "> `feedback` - 回報錯誤\n> `quiz` - 問題挑戰"
+            "這些是給所有靈魂的日常指令，快來一起玩吧～\n\n"
+            "> `time` - 查看待機時間，靈魂的悠閒時光有多少呢？\n"
+            "> `ping` - 測試與靈界的通訊延遲，靈魂的波動有多快？\n"
+            "> `server_info` - 獲取伺服器資訊，白玉樓的秘密都在這裡～\n"
+            "> `user_info` - 窺探其他靈魂的資訊，嘻嘻～\n"
+            "> `feedback` - 回報錯誤，幫幽幽子改進哦～\n"
+            "> `quiz` - 挑戰問題，靈魂的智慧有多深呢？"
         ),
-        color=discord.Color.green()
+        color=discord.Color.from_rgb(255, 182, 193)
     )
     embed_fishing = discord.Embed(
-        title="🎣 釣魚指令",
+        title="🎣 幽幽子的悠閒釣魚時光 🎣",
         description=(
-            "> `fish` - 開啓悠閑釣魚時光\n> `fish_back` - 打開釣魚背包\n"
-            "> `fish_shop` - 販售與購買魚具\n> `fish_rod` - 切換漁具"
+            "在白玉樓的湖邊釣魚，享受悠閒時光吧～\n\n"
+            "> `fish` - 開始釣魚，會釣到什麼魚呢？\n"
+            "> `fish_back` - 打開釣魚背包，看看你的收穫吧～\n"
+            "> `fish_shop` - 販售魚或購買魚具，準備好下次釣魚吧！\n"
+            "> `fish_rod` - 切換漁具，用更好的魚竿釣大魚哦～"
         ),
-        color=discord.Color.blue()
+        color=discord.Color.from_rgb(255, 182, 193)
     )
     embed_gambling = discord.Embed(
-        title="🎰 賭博指令",
+        title="🎰 幽幽子的賭博遊戲 🎰",
         description=(
-            "> `blackjack` - 開啓黑傑克21點賭博"
+            "用幽靈幣來挑戰運氣吧，靈魂的賭局開始啦～\n\n"
+            "> `blackjack` - 與幽幽子玩一場21點遊戲，賭上你的幽靈幣吧！"
         ),
-        color=discord.Color.from_rgb(204, 0, 51)
+        color=discord.Color.from_rgb(255, 182, 193)
     )
 
     for embed in [embed_test, embed_economy, embed_admin, embed_common, embed_fishing, embed_gambling]:
-        embed.set_footer(text="更多指令即將推出，敬請期待...")
+        embed.set_footer(text=random.choice(yuyuko_comments))
 
     options = [
-        discord.SelectOption(label="普通指令", description="查看普通指令", value="common", emoji="🎉"),
-        discord.SelectOption(label="經濟系統", description="查看經濟系統指令", value="economy", emoji="💸"),
-        discord.SelectOption(label="管理員指令", description="查看管理員指令", value="admin", emoji="🔒"),
-        discord.SelectOption(label="釣魚指令", description="查看釣魚相關指令", value="fishing", emoji="🎣"),
-        discord.SelectOption(label="測試員指令", description="查看測試員指令", value="test", emoji="⚠️"),
-        discord.SelectOption(label="賭博指令", description="查看賭博指令", value="gambling", emoji="🎰"),
+        discord.SelectOption(label="日常樂趣", description="查看普通指令", value="common", emoji="🎉"),
+        discord.SelectOption(label="幽靈幣經濟", description="查看經濟系統指令", value="economy", emoji="💸"),
+        discord.SelectOption(label="管理權杖", description="查看管理員指令", value="admin", emoji="🔒"),
+        discord.SelectOption(label="悠閒釣魚", description="查看釣魚相關指令", value="fishing", emoji="🎣"),
+        discord.SelectOption(label="測試員密語", description="查看測試員指令", value="test", emoji="⚠️"),
+        discord.SelectOption(label="賭博遊戲", description="查看賭博指令", value="gambling", emoji="🎰"),
+    ]
+
+    yuyuko_timeout_comments = [
+        "櫻花已凋謝，選單也休息了哦～請重新輸入 `/help` 吧！",
+        "靈魂的舞步停下了，選單也過期啦～再來一次吧！",
+        "嘻嘻，時間到了，選單已經飄走了～重新輸入 `/help` 哦！",
+        "白玉樓的風鈴停了，選單也休息了呢～再試一次吧～",
+        "靈魂的波動消失了，選單也過期啦～請重新輸入 `/help`！"
     ]
 
     async def select_callback(interaction: discord.Interaction):
@@ -3038,7 +3047,7 @@ async def help(ctx: discord.ApplicationContext):
         await interaction.response.edit_message(embed=selected_embed)
 
     select = Select(
-        placeholder="選擇指令分類...",
+        placeholder="選擇指令分類吧，靈魂的指引在等你～",
         options=options
     )
     select.callback = select_callback
@@ -3055,7 +3064,7 @@ async def help(ctx: discord.ApplicationContext):
             try:
                 if self.message:
                     await self.message.edit(
-                        content="此選單已過期，請重新輸入 `/help` 以獲取指令幫助。",
+                        content=random.choice(yuyuko_timeout_comments),
                         view=self
                     )
             except discord.NotFound:
@@ -3065,7 +3074,7 @@ async def help(ctx: discord.ApplicationContext):
     view.add_item(select)
 
     message = await ctx.respond(
-        content="以下是目前可用指令的分類：",
+        content="🌸 歡迎來到白玉樓，我是西行寺幽幽子～請選擇指令分類吧！",
         embed=embed_common,
         view=view
     )
