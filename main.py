@@ -19,7 +19,7 @@ import openai
 from discord.ext import commands
 from discord.ui import View, Button, Select
 from discord import ui
-from discord import Interaction
+from discord import ApplicationContext, Interaction
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from urllib.parse import urlencode
@@ -28,12 +28,13 @@ from responses import food_responses, death_responses, life_death_responses, sel
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from functools import wraps
 
+file_lock = asyncio.Lock()
 load_dotenv()
 
 TOKEN = os.getenv('DISCORD_TOKEN_MAIN_BOT')
 AUTHOR_ID = int(os.getenv('AUTHOR_ID', 0))
 LOG_FILE_PATH = "feedback_log.txt"
-WORK_COOLDOWN_SECONDS = 230
+WORK_COOLDOWN_SECONDS = 60
 API_URL = 'https://api.chatanywhere.org/v1/'
 api_keys = [
     {"key": os.getenv('CHATANYWHERE_API'), "limit": 200, "remaining": 200}
@@ -292,41 +293,53 @@ def init_db():
     conn.close()
 
 def record_message(user_id, message):
-    conn = sqlite3.connect("example.db")
-    c = conn.cursor()
-    c.execute("""
-        SELECT id, repeat_count, is_permanent FROM UserMessages 
-        WHERE user_id = ? AND message = ? AND is_permanent = FALSE
-    """, (user_id, message))
-    row = c.fetchone()
-
-    if row:
-        new_count = row[1] + 1
-        c.execute("""
-            UPDATE UserMessages SET repeat_count = ? WHERE id = ?
-        """, (new_count, row[0]))
-        if new_count >= 10:
+    if not user_id or not message or not isinstance(message, str):
+        return
+    
+    try:
+        with sqlite3.connect("example.db") as conn:
+            c = conn.cursor()
             c.execute("""
-                UPDATE UserMessages SET is_permanent = TRUE WHERE id = ?
-            """, (row[0],))
-    else:
-        c.execute("""
-            INSERT INTO UserMessages (user_id, message) VALUES (?, ?)
-        """, (user_id, message))
+                SELECT id, repeat_count, is_permanent FROM UserMessages 
+                WHERE user_id = ? AND message = ? AND is_permanent = FALSE
+            """, (user_id, message))
+            row = c.fetchone()
 
-    conn.commit()
-    conn.close()
+            if row:
+                new_count = row[1] + 1
+                if new_count >= 10:
+                    c.execute("""
+                        UPDATE UserMessages SET repeat_count = ?, is_permanent = TRUE 
+                        WHERE id = ?
+                    """, (new_count, row[0]))
+                else:
+                    c.execute("""
+                        UPDATE UserMessages SET repeat_count = ? WHERE id = ?
+                    """, (new_count, row[0]))
+            else:
+                c.execute("""
+                    INSERT INTO UserMessages (user_id, message, created_at) 
+                    VALUES (?, ?, ?)
+                """, (user_id, message, datetime.now()))
+            conn.commit()
+    except sqlite3.Error as e:
+        print(f"Database error: {e}")
 
-def clean_old_messages():
-    conn = sqlite3.connect("example.db")
-    c = conn.cursor()
-    thirty_minutes_ago = datetime.now() - timedelta(minutes=30)
-    c.execute("""
-        DELETE FROM UserMessages 
-        WHERE created_at < ? AND is_permanent = FALSE
-    """, (thirty_minutes_ago,))
-    conn.commit()
-    conn.close()
+def clean_old_messages(minutes=20):
+    try:
+        with sqlite3.connect("example3.db") as conn:
+            c = conn.cursor()
+            time_ago = datetime.now(timezone.utc) - timedelta(minutes=minutes)
+            c.execute("""
+                DELETE FROM UserMessages 
+                WHERE created_at < ? AND is_permanent = FALSE
+            """, (time_ago,))
+            deleted_rows = c.rowcount
+            conn.commit()
+            return deleted_rows
+    except sqlite3.Error as e:
+        print(f"資料庫錯誤: {e}")
+        return 0
 
 def summarize_context(context):
     return context[:1500]
@@ -622,22 +635,24 @@ async def on_message(message):
         await message.channel.send(f'deadpool:sh*t, I really should have gone with NSYNC!')
         
     if '普奇神父' in message.content:
-        await message.channel.send(f"你相信引力嗎？")
+        await message.channel.send("引力を信じるか？")
         await asyncio.sleep(3)
-        await message.channel.send(f"我很敬佩第一個吃蘑菇的人，説不定是毒蘑菇呢")
+        await message.channel.send("私は最初にキノコを食べた者を尊敬する。毒キノコかもしれないのに。")
         await asyncio.sleep(5)
-        await message.channel.send(f"DIO")
+        await message.channel.send("DIO…")
         await asyncio.sleep(2)
-        await message.channel.send(f"等我得心應手后，我一定會讓你覺醒的")
+        await message.channel.send("私がこの力を完全に使いこなせるようになったら、必ず君を目覚めさせるよ。")
         await asyncio.sleep(5)
-        await message.channel.send(f"人...終是要上天堂的.")
+        await message.channel.send("人は…いずれ天国へ至るものだ。")
         await asyncio.sleep(3)
-        await message.channel.send(f"最後再説一遍 時間要開始加速了，下來吧")
+        await message.channel.send("最後に言うよ…時間が加速し始める。降りてこい、DIO。")
         await asyncio.sleep(1)
-        await message.channel.send(f"螺旋阶梯、独角仙、废墟街道、无花果塔、德蕾莎之道、特异点、乔托、天使、绣球花、秘密皇帝。")
+        await message.channel.send("螺旋階段、甲虫、廃墟の街、果物のタルト、ドロテアの道、特異点、ジョット、天使、紫陽花、秘密の皇帝…")
         await asyncio.sleep(2)
-        await message.channel.send(f"話已至此，")
-        await message.channel.send(f"# Made in Heaven!!")
+        await message.channel.send("ここまでだ。")
+        await message.channel.send("天国へのカウントダウンが始まる…")
+        await asyncio.sleep(2)
+        await message.channel.send("# メイド・イン・ヘブン！！")
     
     if '關於停雲' in message.content:
         await message.channel.send(f"停雲小姐呀")
@@ -677,7 +692,7 @@ async def on_ready():
     try:
         await bot.change_presence(
             status=discord.Status.dnd,
-            activity=discord.Activity(type=discord.ActivityType.playing, name='正在和主人貼貼')
+            activity=discord.Activity(type=discord.ActivityType.playing, name='Honkai:Star rail')
         )
         print("已設置機器人的狀態。")
     
@@ -743,6 +758,507 @@ async def invite(ctx: discord.ApplicationContext):
     embed.set_footer(text=random.choice(yuyuko_quotes))
     
     await ctx.respond(embed=embed)
+
+@bot.slash_command(name="server_bank", description="與幽幽子的金庫互動，存錢、取錢或借貸～")
+async def server_bank(ctx: discord.ApplicationContext):
+    guild_id = str(ctx.guild.id)
+    user_id = str(ctx.author.id)
+    server_name = ctx.guild.name
+
+    def load_json(file):
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+    
+    def save_json(file, data):
+        with open(file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+    def format_number(num):
+        if num >= 1e20:
+            return f"{num / 1e20:.2f} 兆京"
+        elif num >= 1e16:
+            return f"{num / 1e16:.2f} 京"
+        elif num >= 1e12:
+            return f"{num / 1e12:.2f} 兆"
+        elif num >= 1e8:
+            return f"{num / 1e8:.2f} 億"
+        else:
+            return f"{num:.2f}"
+
+    def check_loan_status(server_config, guild_id, user_id):
+        if guild_id not in server_config or "loans" not in server_config[guild_id]:
+            return None
+
+        if user_id not in server_config[guild_id]["loans"]:
+            return None
+
+        loan = server_config[guild_id]["loans"][user_id]
+        if loan["repaid"]:
+            return None
+
+        due_date = datetime.fromisoformat(loan["due_date"])
+        current_date = datetime.now()
+
+        if current_date > due_date and loan["interest_rate"] == 0.1:
+            loan["interest_rate"] = 0.2
+            server_config[guild_id]["loans"][user_id] = loan
+            save_json("server_config.json", server_config)
+
+        return loan
+
+    balance = load_json("balance.json")
+    server_config = load_json("server_config.json")
+    personal_bank = load_json("personal_bank.json")
+
+    if guild_id not in balance:
+        balance[guild_id] = {}
+    if user_id not in balance[guild_id]:
+        balance[guild_id][user_id] = 0
+
+    if guild_id not in personal_bank:
+        personal_bank[guild_id] = {}
+    if user_id not in personal_bank[guild_id]:
+        personal_bank[guild_id][user_id] = 0
+
+    if guild_id not in server_config:
+        server_config[guild_id] = {}
+    if "server_bank" not in server_config[guild_id]:
+        server_config[guild_id]["server_bank"] = {
+            "total": 0,
+            "contributions": {}
+        }
+
+    user_balance = balance[guild_id][user_id]
+    personal_bank_balance = personal_bank[guild_id][user_id]
+    server_bank_balance = server_config[guild_id]["server_bank"]["total"]
+
+    loan = check_loan_status(server_config, guild_id, user_id)
+    loan_info = ""
+    if loan:
+        due_date = datetime.fromisoformat(loan["due_date"])
+        amount_with_interest = round(loan["amount"] * (1 + loan["interest_rate"]), 2)
+        loan_info = (
+            f"\n\n⚠️ 你有一筆未還款的借貸！\n"
+            f"借貸金額：{format_number(loan['amount'])} 幽靈幣\n"
+            f"當前利息率：{loan['interest_rate'] * 100:.0f}%\n"
+            f"需還款金額：{format_number(amount_with_interest)} 幽靈幣\n"
+            f"還款截止日期：{due_date.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+    embed = discord.Embed(
+        title="🌸 幽幽子的金庫 🌸",
+        description=(
+            f"歡迎來到 **{server_name}** 的金庫，你是要存錢、取錢還是借貸？\n\n"
+            f"你的餘額：{format_number(user_balance)} 幽靈幣\n"
+            f"你的個人金庫：{format_number(personal_bank_balance)} 幽靈幣\n"
+            f"國庫餘額：{format_number(server_bank_balance)} 幽靈幣"
+            f"{loan_info}"
+        ),
+        color=discord.Color.from_rgb(255, 182, 193)
+    )
+
+    class BankButtons(discord.ui.View):
+        def __init__(self, has_loan):
+            super().__init__(timeout=None)
+            self.has_loan = has_loan
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("這不是你的金庫操作哦～", ephemeral=True)
+                return False
+            return True
+
+        @discord.ui.button(label="取錢", style=discord.ButtonStyle.success)
+        async def withdraw(self, button: discord.ui.Button, interaction: discord.Interaction):
+            await interaction.response.send_modal(WithdrawModal(self.message, self.has_loan))
+
+        @discord.ui.button(label="存錢", style=discord.ButtonStyle.primary)
+        async def deposit(self, button: discord.ui.Button, interaction: discord.Interaction):
+            await interaction.response.send_modal(DepositModal(self.message, self.has_loan))
+
+        if not loan:
+            @discord.ui.button(label="借貸", style=discord.ButtonStyle.danger)
+            async def borrow(self, button: discord.ui.Button, interaction: discord.Interaction):
+                await interaction.response.send_modal(BorrowModal(self.message, self.has_loan))
+        else:
+            @discord.ui.button(label="還款", style=discord.ButtonStyle.green)
+            async def repay(self, button: discord.ui.Button, interaction: discord.Interaction):
+                server_config = load_json("server_config.json")
+                loan = check_loan_status(server_config, guild_id, user_id)
+                if not loan or loan["repaid"]:
+                    await interaction.response.send_message(embed=discord.Embed(
+                        title="🌸 無需還款！🌸",
+                        description="你目前沒有未還款的借貸哦～",
+                        color=discord.Color.red()
+                    ), ephemeral=True)
+                    return
+
+                balance = load_json("balance.json")
+                user_balance = balance[guild_id][user_id]
+                amount_with_interest = round(loan["amount"] * (1 + loan["interest_rate"]), 2)
+
+                if user_balance < amount_with_interest:
+                    await interaction.response.send_message(embed=discord.Embed(
+                        title="🌸 餘額不足！🌸",
+                        description=f"你需要 {format_number(amount_with_interest)} 幽靈幣來還款，但你的餘額只有 {format_number(user_balance)} 幽靈幣哦～",
+                        color=discord.Color.red()
+                    ), ephemeral=True)
+                    return
+
+                balance[guild_id][user_id] -= amount_with_interest
+                server_config[guild_id]["server_bank"]["total"] += amount_with_interest
+                server_config[guild_id]["loans"][user_id]["repaid"] = True
+                save_json("balance.json", balance)
+                save_json("server_config.json", server_config)
+
+                embed = discord.Embed(
+                    title="🌸 還款成功！🌸",
+                    description=(
+                        f"你已還款 **{format_number(amount_with_interest)} 幽靈幣**（包含利息）～\n\n"
+                        f"你的新餘額：{format_number(balance[guild_id][user_id])} 幽靈幣\n"
+                        f"國庫新餘額：{format_number(server_config[guild_id]['server_bank']['total'])} 幽靈幣"
+                    ),
+                    color=discord.Color.gold()
+                )
+                await self.message.edit(embed=embed, view=BankButtons(has_loan=False))
+
+    class WithdrawModal(discord.ui.Modal):
+        def __init__(self, message, has_loan):
+            super().__init__(title="幽幽子的金庫 - 取錢", timeout=60)
+            self.message = message
+            self.has_loan = has_loan
+            self.add_item(discord.ui.InputText(
+                label="輸入取款金額",
+                placeholder="輸入你想從個人金庫取出的幽靈幣金額",
+                style=discord.InputTextStyle.short
+            ))
+
+        async def callback(self, interaction: discord.Interaction):
+            try:
+                amount = float(self.children[0].value)
+                amount = round(amount, 2)
+                if amount <= 0:
+                    await interaction.response.send_message(embed=discord.Embed(
+                        title="🌸 無效金額！🌸",
+                        description="取款金額必須大於 0 哦～",
+                        color=discord.Color.red()
+                    ), ephemeral=True)
+                    return
+
+                balance = load_json("balance.json")
+                personal_bank = load_json("personal_bank.json")
+                personal_bank_balance = personal_bank[guild_id][user_id]
+
+                if amount > personal_bank_balance:
+                    await interaction.response.send_message(embed=discord.Embed(
+                        title="🌸 個人金庫餘額不足！🌸",
+                        description=f"你的個人金庫只有 {format_number(personal_bank_balance)} 幽靈幣，無法取出 {format_number(amount)} 哦～",
+                        color=discord.Color.red()
+                    ), ephemeral=True)
+                    return
+
+                personal_bank[guild_id][user_id] -= amount
+                balance[guild_id][user_id] += amount
+                save_json("balance.json", balance)
+                save_json("personal_bank.json", personal_bank)
+
+                embed = discord.Embed(
+                    title="🌸 取款成功！🌸",
+                    description=(
+                        f"你從個人金庫取出了 **{format_number(amount)} 幽靈幣**～\n\n"
+                        f"你的新餘額：{format_number(balance[guild_id][user_id])} 幽靈幣\n"
+                        f"你的個人金庫新餘額：{format_number(personal_bank[guild_id][user_id])} 幽靈幣"
+                    ),
+                    color=discord.Color.gold()
+                )
+                await self.message.edit(embed=embed, view=BankButtons(self.has_loan))
+
+            except ValueError:
+                await interaction.response.send_message(embed=discord.Embed(
+                    title="🌸 無效金額！🌸",
+                    description="請輸入有效的數字金額哦～",
+                    color=discord.Color.red()
+                ), ephemeral=True)
+
+    class DepositModal(discord.ui.Modal):
+        def __init__(self, message, has_loan):
+            super().__init__(title="幽幽子的金庫 - 存錢", timeout=60)
+            self.message = message
+            self.has_loan = has_loan
+            self.add_item(discord.ui.InputText(
+                label="輸入存款金額",
+                placeholder="輸入你想存入個人金庫的幽靈幣金額",
+                style=discord.InputTextStyle.short
+            ))
+
+        async def callback(self, interaction: discord.Interaction):
+            try:
+                amount = float(self.children[0].value)
+                amount = round(amount, 2)
+                if amount <= 0:
+                    await interaction.response.send_message(embed=discord.Embed(
+                        title="🌸 無效金額！🌸",
+                        description="存款金額必須大於 0 哦～",
+                        color=discord.Color.red()
+                    ), ephemeral=True)
+                    return
+
+                balance = load_json("balance.json")
+                personal_bank = load_json("personal_bank.json")
+                user_balance = balance[guild_id][user_id]
+
+                if amount > user_balance:
+                    await interaction.response.send_message(embed=discord.Embed(
+                        title="🌸 餘額不足！🌸",
+                        description=f"你的餘額只有 {format_number(user_balance)} 幽靈幣，無法存入 {format_number(amount)} 哦～",
+                        color=discord.Color.red()
+                    ), ephemeral=True)
+                    return
+
+                if guild_id not in balance:
+                    balance[guild_id] = {}
+                if user_id not in balance[guild_id] or not isinstance(balance[guild_id][user_id], (int, float)):
+                    balance[guild_id][user_id] = 0
+
+                if guild_id not in personal_bank:
+                    personal_bank[guild_id] = {}
+                if user_id not in personal_bank[guild_id] or not isinstance(personal_bank[guild_id][user_id], (int, float)):
+                    personal_bank[guild_id][user_id] = 0
+
+                print(f"扣款前: balance[{guild_id}][{user_id}] = {balance[guild_id][user_id]}")
+                balance[guild_id][user_id] -= amount
+                print(f"扣款後: balance[{guild_id}][{user_id}] = {balance[guild_id][user_id]}")
+                print(f"存款前: personal_bank[{guild_id}][{user_id}] = {personal_bank[guild_id][user_id]}")
+                personal_bank[guild_id][user_id] += amount
+                print(f"存款後: personal_bank[{guild_id}][{user_id}] = {personal_bank[guild_id][user_id]}")
+                
+                save_json("balance.json", balance)
+                save_json("personal_bank.json", personal_bank)
+
+                embed = discord.Embed(
+                    title="🌸 存款成功！🌸",
+                    description=(
+                        f"你存入了 **{format_number(amount)} 幽靈幣** 到個人金庫～\n\n"
+                        f"你的新餘額：{format_number(balance[guild_id][user_id])} 幽靈幣\n"
+                        f"你的個人金庫新餘額：{format_number(personal_bank[guild_id][user_id])} 幽靈幣"
+                    ),
+                    color=discord.Color.gold()
+                )
+                await self.message.edit(embed=embed, view=BankButtons(self.has_loan))
+
+            except ValueError:
+                await interaction.response.send_message(embed=discord.Embed(
+                    title="🌸 無效金額！🌸",
+                    description="請輸入有效的數字金額哦～",
+                    color=discord.Color.red()
+                ), ephemeral=True)
+            except Exception as e:
+                print(f"DepositModal.callback 發生錯誤: {e}")
+                await interaction.response.send_message(embed=discord.Embed(
+                    title="🌸 系統錯誤！🌸",
+                    description="存錢時發生錯誤，請稍後再試～",
+                    color=discord.Color.red()
+                ), ephemeral=True)
+
+    class BorrowModal(discord.ui.Modal):
+        def __init__(self, message, has_loan):
+            super().__init__(title="幽幽子的金庫 - 借貸", timeout=60)
+            self.message = message
+            self.has_loan = has_loan
+            self.add_item(discord.ui.InputText(
+                label="輸入借貸金額",
+                placeholder="輸入你想從國庫借的幽靈幣金額",
+                style=discord.InputTextStyle.short
+            ))
+
+        async def callback(self, interaction: discord.Interaction):
+            try:
+                amount = float(self.children[0].value)
+                amount = round(amount, 2)
+                if amount <= 0:
+                    await interaction.response.send_message(embed=discord.Embed(
+                        title="🌸 無效金額！🌸",
+                        description="借貸金額必須大於 0 哦～",
+                        color=discord.Color.red()
+                    ), ephemeral=True)
+                    return
+
+                balance = load_json("balance.json")
+                server_config = load_json("server_config.json")
+                server_bank_balance = server_config[guild_id]["server_bank"]["total"]
+
+                if amount > server_bank_balance:
+                    await interaction.response.send_message(embed=discord.Embed(
+                        title="🌸 國庫餘額不足！🌸",
+                        description=f"國庫只有 {format_number(server_bank_balance)} 幽靈幣，無法借出 {format_number(amount)} 哦～",
+                        color=discord.Color.red()
+                    ), ephemeral=True)
+                    return
+
+                borrowed_at = datetime.now()
+                due_date = borrowed_at + timedelta(days=5)
+                if "loans" not in server_config[guild_id]:
+                    server_config[guild_id]["loans"] = {}
+                server_config[guild_id]["loans"][user_id] = {
+                    "amount": amount,
+                    "interest_rate": 0.1,
+                    "borrowed_at": borrowed_at.isoformat(),
+                    "due_date": due_date.isoformat(),
+                    "repaid": False
+                }
+
+                server_config[guild_id]["server_bank"]["total"] -= amount
+                balance[guild_id][user_id] += amount
+                save_json("balance.json", balance)
+                save_json("server_config.json", server_config)
+
+                embed = discord.Embed(
+                    title="🌸 借貸成功！🌸",
+                    description=(
+                        f"你從國庫借了 **{format_number(amount)} 幽靈幣**～\n"
+                        f"初始利息率：10%\n"
+                        f"需還款金額：{format_number(amount * 1.1)} 幽靈幣\n"
+                        f"還款截止日期：{due_date.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                        f"（若逾期未還，利息將翻倍至 20%！）\n\n"
+                        f"你的新餘額：{format_number(balance[guild_id][user_id])} 幽靈幣\n"
+                        f"國庫新餘額：{format_number(server_config[guild_id]['server_bank']['total'])} 幽靈幣"
+                    ),
+                    color=discord.Color.gold()
+                )
+                await self.message.edit(embed=embed, view=BankButtons(has_loan=True))
+
+            except ValueError:
+                await interaction.response.send_message(embed=discord.Embed(
+                    title="🌸 無效金額！🌸",
+                    description="請輸入有效的數字金額哦～",
+                    color=discord.Color.red()
+                ), ephemeral=True)
+
+    view = BankButtons(has_loan=bool(loan))
+    message = await ctx.respond(embed=embed, view=view)
+    view.message = message
+
+@bot.slash_command(name="tax", description="幽幽子對伺服器內所有用戶徵收40%的稅金，存入國庫～")
+async def tax(ctx: discord.ApplicationContext):
+    guild_id = str(ctx.guild.id)
+    user_id = str(ctx.author.id)
+    
+    AUTHOR_ID = os.getenv('AUTHOR_ID', "0")
+    print(f"調試: user_id = {user_id}, AUTHOR_ID = {AUTHOR_ID}")
+    
+    if user_id != AUTHOR_ID:
+        await ctx.respond(embed=discord.Embed(
+            title="🌸 權限不足！🌸",
+            description="只有幽幽子的主人才能徵稅哦～",
+            color=discord.Color.red()
+        ))
+        return
+
+    await ctx.defer()
+
+    def load_json(file):
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def save_json(file, data):
+        with open(file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+
+    def format_number(num):
+        if num >= 1e20:
+            return f"{num / 1e20:.2f} 兆京"
+        elif num >= 1e16:
+            return f"{num / 1e16:.2f} 京"
+        elif num >= 1e12:
+            return f"{num / 1e12:.2f} 兆"
+        elif num >= 1e8:
+            return f"{num / 1e8:.2f} 億"
+        else:
+            return f"{num:.2f}"
+
+    balance = load_json("balance.json")
+    server_config = load_json("server_config.json")
+
+    if not balance.get(guild_id):
+        await ctx.followup.send(embed=discord.Embed(
+            title="🌸 無人可稅！🌸",
+            description="這個伺服器還沒有人有幽靈幣哦～快去玩遊戲賺錢吧！",
+            color=discord.Color.red()
+        ))
+        return
+
+    tax_rate = 0.4
+    total_tax = 0
+    taxed_users = []
+
+    for taxed_user_id, user_balance in balance[guild_id].items():
+        if taxed_user_id == user_id:
+            continue
+        if user_balance <= 0:
+            continue
+
+        tax_amount = round(user_balance * tax_rate, 2)
+        new_balance = round(user_balance - tax_amount, 2)
+        balance[guild_id][taxed_user_id] = new_balance
+        total_tax += tax_amount
+
+        try:
+            user = await bot.fetch_user(int(taxed_user_id))
+            display_name = user.display_name
+        except discord.errors.NotFound:
+            display_name = f"用戶ID: {taxed_user_id}"
+        taxed_users.append(f"**{display_name}**：{format_number(tax_amount)} 幽靈幣")
+
+    if not taxed_users:
+        await ctx.followup.send(embed=discord.Embed(
+            title="🌸 無人可稅！🌸",
+            description="沒有人有足夠的幽靈幣可以徵稅哦～",
+            color=discord.Color.red()
+        ))
+        return
+
+    if guild_id not in server_config:
+        server_config[guild_id] = {}
+    if "server_bank" not in server_config[guild_id]:
+        server_config[guild_id]["server_bank"] = {
+            "total": 0,
+            "contributions": {}
+        }
+
+    server_config[guild_id]["server_bank"]["total"] += total_tax
+
+    for taxed_user_id in balance[guild_id]:
+        if taxed_user_id == user_id:
+            continue
+        tax_amount = round(balance[guild_id][taxed_user_id] * tax_rate / (1 - tax_rate) * tax_rate, 2)
+        if tax_amount <= 0:
+            continue
+        if taxed_user_id not in server_config[guild_id]["server_bank"]["contributions"]:
+            server_config[guild_id]["server_bank"]["contributions"][taxed_user_id] = 0
+        server_config[guild_id]["server_bank"]["contributions"][taxed_user_id] += tax_amount
+
+    save_json("balance.json", balance)
+    save_json("server_config.json", server_config)
+
+    executor = ctx.author.display_name
+    embed = discord.Embed(
+        title="🌸 幽幽子的稅金徵收！🌸",
+        description=(
+            f"幽幽子對伺服器內所有用戶徵收了 40% 的稅金，存入國庫～\n"
+            f"徵稅執行者：**{executor}**\n\n"
+            f"被徵稅者：\n" + "\n".join(taxed_users) + f"\n\n"
+            f"總稅金：{format_number(total_tax)} 幽靈幣\n"
+            f"國庫當前餘額：{format_number(server_config[guild_id]['server_bank']['total'])} 幽靈幣"
+        ),
+        color=discord.Color.from_rgb(255, 182, 193)
+    )
+    await ctx.followup.send(embed=embed)
 
 @bot.slash_command(name="blackjack", description="幽幽子與你共舞一場21點遊戲～")
 async def blackjack(ctx: discord.ApplicationContext, bet: float):
@@ -835,218 +1351,267 @@ async def blackjack(ctx: discord.ApplicationContext, bet: float):
     player_cards = [deck.pop(), deck.pop()]
     dealer_cards = [deck.pop(), deck.pop()]
 
-    balance[guild_id][user_id] = round(user_balance - bet, 2)
+    balance.setdefault(guild_id, {})[user_id] = round(user_balance - bet, 2)
     save_json("balance.json", balance)
+
+    is_gambler = config.get(guild_id, {}).get(user_id, {}).get('job') == '賭徒'
 
     blackjack_data.setdefault(guild_id, {})[user_id] = {
         "player_cards": player_cards,
         "dealer_cards": dealer_cards,
         "bet": bet,
         "game_status": "ongoing",
-        "double_down_used": False
+        "double_down_used": False,
+        "is_gambler": is_gambler
     }
     save_json("blackjack_data.json", blackjack_data)
 
-    async def auto_settle():
-        blackjack_data = load_json("blackjack_data.json")
-        player_cards = blackjack_data[guild_id][user_id]["player_cards"]
-        player_total = calculate_hand(player_cards)
-        if player_total == 21:
-            blackjack_data[guild_id][user_id]["game_status"] = "ended"
-            save_json("blackjack_data.json", blackjack_data)
+    player_total = calculate_hand(player_cards)
+    if player_total == 21:
+        blackjack_data[guild_id][user_id]["game_status"] = "ended"
+        save_json("blackjack_data.json", blackjack_data)
 
-            reward = round(bet * 2.5, 2)
-            balance[guild_id][user_id] += reward
-            save_json("balance.json", balance)
+        multiplier = 5 if is_gambler else 2.5
+        reward = round(bet * multiplier, 2)
+        balance[guild_id][user_id] += reward
+        save_json("balance.json", balance)
 
-            await ctx.respond(embed=discord.Embed(
-                title="🌸 黑傑克！靈魂的勝利！🌸",
-                description=f"你的手牌: {player_cards}\n幽幽子為你獻上 {reward:.2f} 幽靈幣的祝福～",
-                color=discord.Color.gold()
-            ))
-            return True
-        return False
-
-    if await auto_settle():
+        await ctx.respond(embed=discord.Embed(
+            title="🌸 黑傑克！靈魂的勝利！🌸",
+            description=f"你的手牌: {player_cards}\n幽幽子為你獻上 {reward:.2f} 幽靈幣的祝福～",
+            color=discord.Color.gold()
+        ))
         return
 
     embed = discord.Embed(
         title="🌸 幽幽子的21點遊戲開始！🌸",
         description=(
             f"你下注了 **{bet:.2f} 幽靈幣**，讓我們共舞一場吧～\n\n"
-            f"你的初始手牌: {player_cards} (總點數: {calculate_hand(player_cards)})\n"
-            f"幽幽子的明牌: {dealer_cards[0]}"
+            f"你的初始手牌: {player_cards} (總點數: {calculate_hand(player_cards)})\n幽幽子的明牌: {dealer_cards[0]}"
         ),
         color=discord.Color.from_rgb(255, 182, 193)
     )
     embed.set_footer(text="選擇你的命運吧～")
 
-    class BlackjackButtons(View):
-        def __init__(self, deck):
-            super().__init__()
+    class BlackjackButtons(discord.ui.View):
+        def __init__(self, deck, interaction: discord.Interaction, blackjack_data):
+            super().__init__(timeout=180)
             self.deck = deck
+            self.interaction = interaction
+            self.blackjack_data = blackjack_data
+
+        async def on_timeout(self):
+            try:
+                if self.blackjack_data[guild_id][user_id]["game_status"] == "ongoing":
+                    balance = load_json("balance.json")
+                    bet = self.blackjack_data[guild_id][user_id]["bet"]
+                    balance[guild_id][user_id] += bet
+                    save_json("balance.json", balance)
+                    self.blackjack_data[guild_id][user_id]["game_status"] = "ended"
+                    save_json("blackjack_data.json", self.blackjack_data)
+                    await self.interaction.edit_original_response(
+                        embed=discord.Embed(
+                            title="🌸 遊戲超時，靈魂休息了～🌸",
+                            description=f"時間到了，遊戲已結束。退還你的賭注 {bet:.2f} 幽靈幣，下次再來挑戰幽幽子吧！",
+                            color=discord.Color.blue()
+                        ),
+                        view=None
+                    )
+            except discord.errors.NotFound:
+                pass
+
+        async def interaction_check(self, interaction: discord.Interaction) -> bool:
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("這不是你的遊戲哦～", ephemeral=True)
+                return False
+            return True
+
+        async def auto_settle(self, interaction: discord.Interaction):
+            player_cards = self.blackjack_data[guild_id][user_id]["player_cards"]
+            player_total = calculate_hand(player_cards)
+            if player_total == 21:
+                self.blackjack_data[guild_id][user_id]["game_status"] = "ended"
+                bet = self.blackjack_data[guild_id][user_id]["bet"]
+                is_gambler = self.blackjack_data[guild_id][user_id]["is_gambler"]
+                multiplier = 5 if is_gambler else 2.5
+                reward = round(bet * multiplier, 2)
+                balance = load_json("balance.json")
+                balance[guild_id][user_id] += reward
+                save_json("balance.json", balance)
+                save_json("blackjack_data.json", self.blackjack_data)
+
+                await interaction.edit_original_response(embed=discord.Embed(
+                    title="🌸 黑傑克！靈魂的勝利！🌸",
+                    description=f"你的手牌: {player_cards}\n幽幽子為你獻上 {reward:.2f} 幽靈幣的祝福～",
+                    color=discord.Color.gold()
+                ), view=None)
+                return True
+            return False
 
         @discord.ui.button(label="抽牌 (Hit)", style=discord.ButtonStyle.primary)
-        async def hit(self, button: Button, interaction: Interaction):
-            guild_id = str(interaction.guild.id)
-            user_id = str(interaction.user.id)
-            
-            blackjack_data = load_json("blackjack_data.json")
-            player_cards = blackjack_data[guild_id][user_id]["player_cards"]
+        async def hit(self, button: discord.ui.Button, interaction: discord.Interaction):
+            try:
+                await interaction.response.defer()
+                player_cards = self.blackjack_data[guild_id][user_id]["player_cards"]
+                player_cards.append(self.deck.pop())
+                player_total = calculate_hand(player_cards)
 
-            player_cards.append(self.deck.pop())
-            blackjack_data[guild_id][user_id]["player_cards"] = player_cards
-            save_json("blackjack_data.json", blackjack_data)
+                if player_total > 21:
+                    self.blackjack_data[guild_id][user_id]["game_status"] = "ended"
+                    save_json("blackjack_data.json", self.blackjack_data)
+                    await self.interaction.edit_original_response(embed=discord.Embed(
+                        title="🌸 哎呀，靈魂爆掉了！🌸",
+                        description=f"你的手牌: {player_cards}\n點數總計: {player_total}\n下次再來挑戰幽幽子吧～",
+                        color=discord.Color.red()
+                    ), view=None)
+                    return
 
-            player_total = calculate_hand(player_cards)
+                if await self.auto_settle(interaction):
+                    return
 
-            if player_total > 21:
-                blackjack_data[guild_id][user_id]["game_status"] = "ended"
-                save_json("blackjack_data.json", blackjack_data)
-                await interaction.response.edit_message(embed=discord.Embed(
-                    title="🌸 哎呀，靈魂爆掉了！🌸",
-                    description=f"你的手牌: {player_cards}\n點數總計: {player_total}\n下次再來挑戰幽幽子吧～",
-                    color=discord.Color.red()
-                ), view=None)
-                return
-
-            if await auto_settle():
-                return
-
-            await interaction.response.edit_message(embed=discord.Embed(
-                title="🌸 你抽了一張牌！🌸",
-                description=f"你的手牌: {player_cards}\n目前點數: {player_total}",
-                color=discord.Color.from_rgb(255, 182, 193)
-            ), view=self)
+                await self.interaction.edit_original_response(embed=discord.Embed(
+                    title="🌸 你抽了一張牌！🌸",
+                    description=f"你的手牌: {player_cards}\n目前點數: {player_total}",
+                    color=discord.Color.from_rgb(255, 182, 193)
+                ), view=self)
+            except discord.errors.NotFound:
+                await interaction.followup.send("遊戲交互已失效，請重新開始一局！", ephemeral=True)
 
         @discord.ui.button(label="停牌 (Stand)", style=discord.ButtonStyle.danger)
-        async def stand(self, button: Button, interaction: Interaction):
-            guild_id = str(interaction.guild.id)
-            user_id = str(interaction.user.id)
-            blackjack_data = load_json("blackjack_data.json")
-            balance = load_json("balance.json")
+        async def stand(self, button: discord.ui.Button, interaction: discord.Interaction):
+            try:
+                await interaction.response.defer()
+                balance = load_json("balance.json")
+                player_cards = self.blackjack_data[guild_id][user_id]["player_cards"]
+                dealer_cards = self.blackjack_data[guild_id][user_id]["dealer_cards"]
+                bet = self.blackjack_data[guild_id][user_id]["bet"]
+                is_gambler = self.blackjack_data[guild_id][user_id]["is_gambler"]
 
-            player_cards = blackjack_data[guild_id][user_id]["player_cards"]
-            dealer_cards = blackjack_data[guild_id][user_id]["dealer_cards"]
-            bet = blackjack_data[guild_id][user_id]["bet"]
+                self.blackjack_data[guild_id][user_id]["game_status"] = "ended"
+                save_json("blackjack_data.json", self.blackjack_data)
 
-            blackjack_data[guild_id][user_id]["game_status"] = "ended"
-            save_json("blackjack_data.json", blackjack_data)
-
-            dealer_total = calculate_hand(dealer_cards)
-            while dealer_total < 17:
-                dealer_cards.append(self.deck.pop())
                 dealer_total = calculate_hand(dealer_cards)
+                while dealer_total < 17:
+                    dealer_cards.append(self.deck.pop())
+                    dealer_total = calculate_hand(dealer_cards)
 
-            player_total = calculate_hand(player_cards)
+                player_total = calculate_hand(player_cards)
 
-            if dealer_total > 21 or player_total > dealer_total:
-                reward = round(bet * 2, 2)
-                balance[guild_id][user_id] += reward
-                save_json("balance.json", balance)
-                embed = discord.Embed(
-                    title="🌸 靈魂的勝利！🌸",
-                    description=f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n你贏得了 {reward:.2f} 幽靈幣～",
-                    color=discord.Color.gold()
-                )
-            elif player_total == dealer_total:
-                reward = round(bet, 2)
-                balance[guild_id][user_id] += reward
-                save_json("balance.json", balance)
-                embed = discord.Embed(
-                    title="🌸 平手，靈魂的平衡～🌸",
-                    description=f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n退還賭注: {reward:.2f} 幽靈幣",
-                    color=discord.Color.from_rgb(255, 182, 193)
-                )
-            else:
-                embed = discord.Embed(
-                    title="🌸 殘念，幽幽子贏了！🌸",
-                    description=f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n下次再來挑戰吧～",
-                    color=discord.Color.red()
-                )
+                if dealer_total > 21 or player_total > dealer_total:
+                    multiplier = 4 if is_gambler else 2
+                    reward = round(bet * multiplier, 2)
+                    balance[guild_id][user_id] += reward
+                    save_json("balance.json", balance)
+                    embed = discord.Embed(
+                        title="🌸 靈魂的勝利！🌸",
+                        description=f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n你贏得了 {reward:.2f} 幽靈幣～",
+                        color=discord.Color.gold()
+                    )
+                elif player_total == dealer_total:
+                    reward = round(bet, 2)
+                    balance[guild_id][user_id] += reward
+                    save_json("balance.json", balance)
+                    embed = discord.Embed(
+                        title="🌸 平手，靈魂的平衡～🌸",
+                        description=f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n退還賭注: {reward:.2f} 幽靈幣",
+                        color=discord.Color.from_rgb(255, 182, 193)
+                    )
+                else:
+                    embed = discord.Embed(
+                        title="🌸 殘念，幽幽子贏了！🌸",
+                        description=f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n下次再來挑戰吧～",
+                        color=discord.Color.red()
+                    )
 
-            await interaction.response.edit_message(embed=embed, view=None)
+                await self.interaction.edit_original_response(embed=embed, view=None)
+            except discord.errors.NotFound:
+                await interaction.followup.send("遊戲交互已失效，請重新開始一局！", ephemeral=True)
 
         @discord.ui.button(label="雙倍下注 (Double Down)", style=discord.ButtonStyle.success)
-        async def double_down(self, button: Button, interaction: Interaction):
-            guild_id = str(interaction.guild.id)
-            user_id = str(interaction.user.id)
-            blackjack_data = load_json("blackjack_data.json")
-            balance = load_json("balance.json")
+        async def double_down(self, button: discord.ui.Button, interaction: discord.Interaction):
+            try:
+                await interaction.response.defer()
+                balance = load_json("balance.json")
+                if self.blackjack_data[guild_id][user_id]["double_down_used"]:
+                    await self.interaction.edit_original_response(embed=discord.Embed(
+                        title="🌸 無法再次挑戰命運！🌸",
+                        description="你已經使用過雙倍下注了哦～",
+                        color=discord.Color.red()
+                    ), view=None)
+                    return
 
-            if blackjack_data[guild_id][user_id]["double_down_used"]:
-                await interaction.response.edit_message(embed=discord.Embed(
-                    title="🌸 無法再次挑戰命運！🌸",
-                    description="你已經使用過雙倍下注了哦～",
-                    color=discord.Color.red()
-                ), view=None)
-                return
+                bet = self.blackjack_data[guild_id][user_id]["bet"]
+                is_gambler = self.blackjack_data[guild_id][user_id]["is_gambler"]
+                user_balance = balance[guild_id][user_id]
+                doubled_bet = bet * 2
 
-            bet = blackjack_data[guild_id][user_id]["bet"]
-            user_balance = balance[guild_id][user_id]
+                if user_balance < bet:
+                    await self.interaction.edit_original_response(embed=discord.Embed(
+                        title="🌸 嘻嘻，靈魂不夠喲～ 🌸",
+                        description=f"你的幽靈幣只有 {user_balance:.2f}，不足以讓幽幽子給你雙倍下注 {doubled_bet:.2f} 哦～再去收集一些吧！",
+                        color=discord.Color.red()
+                    ), view=self)
+                    return
 
-            if user_balance < bet:
-                await interaction.response.edit_message(embed=discord.Embed(
-                    title="🌸 幽靈幣不足！🌸",
-                    description="你的幽靈幣不足，無法雙倍下注哦～",
-                    color=discord.Color.red()
-                ), view=None)
-                return
+                self.blackjack_data[guild_id][user_id]["bet"] = doubled_bet
+                self.blackjack_data[guild_id][user_id]["double_down_used"] = True
+                balance[guild_id][user_id] -= bet
+                save_json("balance.json", balance)
 
-            blackjack_data[guild_id][user_id]["bet"] *= 2
-            blackjack_data[guild_id][user_id]["double_down_used"] = True
-            balance[guild_id][user_id] -= bet
+                player_cards = self.blackjack_data[guild_id][user_id]["player_cards"]
+                dealer_cards = self.blackjack_data[guild_id][user_id]["dealer_cards"]
+                player_cards.append(self.deck.pop())
+                player_total = calculate_hand(player_cards)
 
-            player_cards = blackjack_data[guild_id][user_id]["player_cards"]
-            dealer_cards = blackjack_data[guild_id][user_id]["dealer_cards"]
-            player_cards.append(self.deck.pop())
-            player_total = calculate_hand(player_cards)
+                self.blackjack_data[guild_id][user_id]["player_cards"] = player_cards
+                self.blackjack_data[guild_id][user_id]["game_status"] = "ended"
+                save_json("blackjack_data.json", self.blackjack_data)
 
-            blackjack_data[guild_id][user_id]["player_cards"] = player_cards
-            blackjack_data[guild_id][user_id]["game_status"] = "ended"
-            save_json("balance.json", balance)
-            save_json("blackjack_data.json", blackjack_data)
+                embed = discord.Embed(
+                    title="🌸 雙倍下注，挑戰命運！🌸",
+                    description=f"你的手牌: {player_cards} (總點數: {player_total})\n賭注翻倍為 {doubled_bet:.2f} 幽靈幣",
+                    color=discord.Color.gold()
+                )
 
-            embed = discord.Embed(
-                title="🌸 雙倍下注，挑戰命運！🌸",
-                description=f"你的手牌: {player_cards} (總點數: {player_total})\n賭注翻倍為 {blackjack_data[guild_id][user_id]['bet']:.2f} 幽靈幣",
-                color=discord.Color.gold()
-            )
+                if player_total > 21:
+                    embed.title = "🌸 哎呀，靈魂爆掉了！🌸"
+                    embed.description = f"你的手牌: {player_cards}\n總點數: {player_total}\n下次再來挑戰幽幽子吧～"
+                    embed.color = discord.Color.red()
+                    await self.interaction.edit_original_response(embed=embed, view=None)
+                    return
 
-            if player_total > 21:
-                embed.title = "🌸 哎呀，靈魂爆掉了！🌸"
-                embed.description = f"你的手牌: {player_cards}\n總點數: {player_total}\n下次再來挑戰幽幽子吧～"
-                embed.color = discord.Color.red()
-                await interaction.response.edit_message(embed=embed, view=None)
-                return
-
-            dealer_total = calculate_hand(dealer_cards)
-            while dealer_total < 17:
-                dealer_cards.append(self.deck.pop())
                 dealer_total = calculate_hand(dealer_cards)
+                while dealer_total < 17:
+                    dealer_cards.append(self.deck.pop())
+                    dealer_total = calculate_hand(dealer_cards)
 
-            if dealer_total > 21 or player_total > dealer_total:
-                reward = blackjack_data[guild_id][user_id]["bet"] * 2
-                balance[guild_id][user_id] += reward
-                save_json("balance.json", balance)
-                embed.title = "🌸 靈魂的勝利！🌸"
-                embed.description = f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n你�赢得了 {reward:.2f} 幽靈幣～"
-                embed.color = discord.Color.gold()
-            elif player_total == dealer_total:
-                reward = blackjack_data[guild_id][user_id]["bet"]
-                balance[guild_id][user_id] += reward
-                save_json("balance.json", balance)
-                embed.title = "🌸 平手，靈魂的平衡～🌸"
-                embed.description = f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n退還賭注: {reward:.2f} 幽靈幣"
-                embed.color = discord.Color.from_rgb(255, 182, 193)
-            else:
-                embed.title = "🌸 殘念，幽幽子贏了！🌸"
-                embed.description = f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n下次再來挑戰吧～"
-                embed.color = discord.Color.red()
+                if dealer_total > 21 or player_total > dealer_total:
+                    multiplier = 4 if is_gambler else 2
+                    reward = round(doubled_bet * multiplier, 2)
+                    balance[guild_id][user_id] += reward
+                    save_json("balance.json", balance)
+                    embed.title = "🌸 靈魂的勝利！🌸"
+                    embed.description = f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n你贏得了 {reward:.2f} 幽靈幣～"
+                    embed.color = discord.Color.gold()
+                elif player_total == dealer_total:
+                    reward = doubled_bet
+                    balance[guild_id][user_id] += reward
+                    save_json("balance.json", balance)
+                    embed.title = "🌸 平手，靈魂的平衡～🌸"
+                    embed.description = f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n退還賭注: {reward:.2f} 幽靈幣"
+                    embed.color = discord.Color.from_rgb(255, 182, 193)
+                else:
+                    embed.title = "🌸 殘念，幽幽子贏了！🌸"
+                    embed.description = f"你的手牌: {player_cards}\n幽幽子的手牌: {dealer_cards}\n下次再來挑戰吧～"
+                    embed.color = discord.Color.red()
 
-            await interaction.response.edit_message(embed=embed, view=None)
+                await self.interaction.edit_original_response(embed=embed, view=None)
+            except discord.errors.NotFound:
+                await interaction.followup.send("遊戲交互已失效，請重新開始一局！", ephemeral=True)
 
-    await ctx.respond(embed=embed, view=BlackjackButtons(deck))
+    interaction = await ctx.respond(embed=embed)
+    view = BlackjackButtons(deck, interaction, blackjack_data)
+    await interaction.edit_original_response(view=view)
 
 @bot.slash_command(name="about-me", description="關於幽幽子的一切～")
 async def about_me(ctx: discord.ApplicationContext):
@@ -1091,7 +1656,6 @@ async def about_me(ctx: discord.ApplicationContext):
         inline=False
     )
 
-    # 開發者資訊字段
     embed.add_field(
         name="🖌️ 召喚我之人",
         value=(
@@ -1113,6 +1677,18 @@ async def about_me(ctx: discord.ApplicationContext):
 @bot.slash_command(name="balance", description="幽幽子為你窺探幽靈幣的數量～")
 @track_balance_json
 async def balance(ctx: discord.ApplicationContext):
+    def format_number(num):
+        if num >= 1e20:
+            return f"{num / 1e20:.2f} 兆京"
+        elif num >= 1e16:
+            return f"{num / 1e16:.2f} 京"
+        elif num >= 1e12:
+            return f"{num / 1e12:.2f} 兆"
+        elif num >= 1e8:
+            return f"{num / 1e8:.2f} 億"
+        else:
+            return f"{num:.2f}"
+
     try:
         await ctx.defer(ephemeral=False)
 
@@ -1133,12 +1709,14 @@ async def balance(ctx: discord.ApplicationContext):
             "這樣的數量，會讓幽靈們羨慕吧？"
         ]
 
+        formatted_balance = format_number(balance)
+
         embed = discord.Embed(
             title="🌸 幽幽子的幽靈幣窺探 🌸",
             description=(
                 f"**{ctx.user.display_name}**，讓幽幽子為你揭示吧～\n\n"
                 f"在這片靈魂之地，你的幽靈幣餘額為：\n"
-                f"**{balance:.2f} 幽靈幣**"
+                f"**{formatted_balance} 幽靈幣**"
             ),
             color=discord.Color.from_rgb(255, 182, 193)
         )
@@ -1166,54 +1744,105 @@ async def balance(ctx: discord.ApplicationContext):
             except discord.errors.NotFound:
                 logging.warning("Failed to respond due to expired interaction.")
 
-@bot.slash_command(name="balance_top", description="查看幽靈幣排行榜")
-@track_balance_json
-async def balance_top(interaction: discord.Interaction):
-    """顯示伺服器內前 10 名擁有最多幽靈幣的用戶"""
-    try:
-        if not interaction.guild:
-            await interaction.response.send_message("此命令只能在伺服器中使用。", ephemeral=True)
-            return
+@bot.slash_command(name="leaderboard", description="查看幽靈幣餘額和金庫貢獻排行榜～")
+async def leaderboard(ctx: discord.ApplicationContext):
+    guild_id = str(ctx.guild.id)
 
-        await interaction.response.defer()
+    def load_json(file):
+        try:
+            with open(file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
 
-        balance_data = await read_balance_file()
-        guild_id = str(interaction.guild.id)
-        if guild_id not in balance_data or not balance_data[guild_id]:
-            await interaction.followup.send("目前沒有排行榜數據。", ephemeral=True)
-            return
+    def format_number(num):
+        if num >= 1e20:
+            return f"{num / 1e20:.2f} 兆京"
+        elif num >= 1e16:
+            return f"{num / 1e16:.2f} 京"
+        elif num >= 1e12:
+            return f"{num / 1e12:.2f} 兆"
+        elif num >= 1e8:
+            return f"{num / 1e8:.2f} 億"
+        else:
+            return f"{num:.2f}"
+            
+    if not ctx.guild:
+        await ctx.respond("此命令只能在伺服器中使用。", ephemeral=True)
+        return
 
+    await ctx.defer()
+
+    balance_data = load_json("balance.json")
+    server_config = load_json("server_config.json")
+
+    embed = discord.Embed(
+        title="🏆 幽幽子的排行榜 🏆",
+        color=discord.Color.from_rgb(255, 182, 193)
+    )
+
+    if guild_id not in balance_data or not balance_data[guild_id]:
+        embed.add_field(
+            name="🌸 幽靈幣餘額排行榜 🌸",
+            value="目前沒有餘額排行榜數據哦～快去賺取幽靈幣吧！",
+            inline=False
+        )
+    else:
         guild_balances = balance_data[guild_id]
         sorted_balances = sorted(guild_balances.items(), key=lambda x: x[1], reverse=True)
 
-        leaderboard = []
+        balance_leaderboard = []
         for index, (user_id, balance) in enumerate(sorted_balances[:10], start=1):
             try:
-                member = interaction.guild.get_member(int(user_id))
+                member = ctx.guild.get_member(int(user_id))
                 if member:
                     username = member.display_name
                 else:
                     user = await bot.fetch_user(int(user_id))
-                    username = user.name if user else f"未知用戶（ID: {user_id}）"
+                    username = user.display_name if user else f"用戶ID: {user_id}"
             except Exception as fetch_error:
-                logging.error(f"無法獲取用戶 {user_id} 的名稱: {fetch_error}")
-                username = f"未知用戶（ID: {user_id}）"
-            leaderboard.append(f"**#{index}** - {username}: {balance} 幽靈幣")
+                username = f"用戶ID: {user_id}"
+            balance_leaderboard.append(f"**#{index}** - {username}: {format_number(balance)} 幽靈幣")
 
-        leaderboard_message = "\n".join(leaderboard) if leaderboard else "排行榜數據為空。"
-
-        embed = discord.Embed(
-            title="🏆 幽靈幣排行榜 🏆",
-            description=leaderboard_message,
-            color=discord.Color.from_rgb(255, 182, 193)
+        balance_message = "\n".join(balance_leaderboard) if balance_leaderboard else "排行榜數據為空。"
+        embed.add_field(
+            name="🌸 幽靈幣餘額排行榜 🌸",
+            value=balance_message,
+            inline=False
         )
-        embed.set_footer(text="排行榜僅顯示前 10 名")
 
-        await interaction.followup.send(embed=embed)
+    if guild_id not in server_config or "server_bank" not in server_config[guild_id]:
+        embed.add_field(
+            name="🌸 金庫貢獻排行榜 🌸",
+            value="金庫還沒有任何貢獻哦～快去存錢或被徵稅吧！",
+            inline=False
+        )
+    else:
+        contributions = server_config[guild_id]["server_bank"]["contributions"]
+        sorted_contributions = sorted(contributions.items(), key=lambda x: x[1], reverse=True)
 
-    except Exception as e:
-        await interaction.followup.send("執行命令時發生未預期的錯誤，請稍後再試。", ephemeral=True)
-        logging.error(f"執行命令時發生錯誤: {e}")
+        contribution_leaderboard = []
+        for index, (user_id, amount) in enumerate(sorted_contributions[:10], start=1):
+            try:
+                member = ctx.guild.get_member(int(user_id))
+                if member:
+                    username = member.display_name
+                else:
+                    user = await bot.fetch_user(int(user_id))
+                    username = user.display_name if user else f"用戶ID: {user_id}"
+            except Exception as fetch_error:
+                username = f"用戶ID: {user_id}"
+            contribution_leaderboard.append(f"**#{index}** - {username}: {format_number(amount)} 幽靈幣")
+
+        contribution_message = "\n".join(contribution_leaderboard) if contribution_leaderboard else "排行榜數據為空。"
+        embed.add_field(
+            name="🌸 金庫貢獻排行榜 🌸",
+            value=contribution_message,
+            inline=False
+        )
+
+    embed.set_footer(text="排行榜僅顯示前 10 名")
+    await ctx.followup.send(embed=embed)
         
 @bot.slash_command(name="shop", description="查看商店中的商品列表")
 async def shop(ctx: discord.ApplicationContext):
@@ -1777,7 +2406,7 @@ async def restart(interaction: discord.Interaction):
             await interaction.followup.send(f"重启失败，错误信息：{e}", ephemeral=True)
     else:
         await interaction.response.send_message("你没有权限执行此操作。", ephemeral=True)
-
+        
 @bot.slash_command(name="ban", description="封禁用户")
 async def ban(interaction: discord.Interaction, member: discord.Member, reason: str = None):
     if not interaction.user.guild_permissions.ban_members:
@@ -1954,7 +2583,6 @@ async def start_giveaway(interaction: discord.Interaction, duration: int, prize:
 
 @bot.slash_command(name="clear", description="清除指定数量的消息")
 async def clear(interaction: discord.Interaction, amount: int):
-    # 使用 ephemeral defer，讓回應僅對使用者可見
     await interaction.response.defer(ephemeral=True)
 
     if not interaction.user.guild_permissions.administrator:
@@ -2506,189 +3134,20 @@ async def untimeout(interaction: discord.Interaction, member: discord.Member):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-@bot.slash_command(name="fish_shop", description="釣魚商店")
-@track_balance_json
-async def fish_shop(ctx: discord.ApplicationContext):
-    user_id = str(ctx.user.id)
-    guild_id = str(ctx.guild.id)
-
-    try:
-        with open("fishiback.yml", "r", encoding="utf-8") as fishiback_file:
-            fishiback_data = yaml.safe_load(fishiback_file)
-    except FileNotFoundError:
-        fishiback_data = {}
-
-    try:
-        with open("balance.json", "r", encoding="utf-8") as balance_file:
-            balance_data = json.load(balance_file)
-    except FileNotFoundError:
-        balance_data = {}
-    except json.JSONDecodeError:
-        balance_data = {}
-
-    user_fishes = fishiback_data.get(user_id, {}).get(guild_id, {}).get("fishes", [])
-    user_balance = balance_data.get(guild_id, {}).get(user_id, 0)
-
-    class FishShopView(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=180)
-
-        @discord.ui.button(label="前往出售漁獲", style=discord.ButtonStyle.primary)
-        async def go_to_sell(self, button: discord.ui.Button, interaction: discord.Interaction):
-            if not user_fishes:
-                embed = discord.Embed(
-                    title="釣魚商店通知",
-                    description="您目前沒有漁獲可以販售！",
-                    color=discord.Color.red()
-                )
-                embed.set_footer(text="請繼續努力釣魚吧！")
-                await interaction.response.edit_message(embed=embed, view=None)
-                return
-
-            sell_view = FishSellView()
-            embed = sell_view.get_updated_embed()
-            await interaction.response.edit_message(embed=embed, view=sell_view)
-
-    class FishSellView(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=180)
-            self.update_options()
-
-        def update_options(self):
-            self.clear_items()
-
-            if not user_fishes:
-                self.add_item(discord.ui.Button(label="目前沒有漁獲可販售", style=discord.ButtonStyle.grey, disabled=True))
-                return
-
-            select_menu = discord.ui.Select(
-                placeholder="選擇您要販售的漁獲",
-                options=[
-                    discord.SelectOption(
-                        label=f"{fish['name']} ({fish['rarity'].capitalize()})",
-                        description=f"重量: {fish['size']} 公斤",
-                        value=str(index)
-                    ) for index, fish in enumerate(user_fishes)
-                ]
-            )
-
-            async def select_fish_callback(interaction: discord.Interaction):
-                selected_index = int(select_menu.values[0])
-                selected_fish = user_fishes[selected_index]
-
-                rarity_colors = {
-                    "common": discord.Color.green(),
-                    "uncommon": discord.Color.blue(),
-                    "rare": discord.Color.purple(),
-                    "legendary": discord.Color.orange(),
-                    "deify": discord.Color.gold(),
-                    "unknown": discord.Color.light_grey()
-                }
-
-                embed = discord.Embed(
-                    title=f"選擇的漁獲: {selected_fish['name']}",
-                    color=rarity_colors.get(selected_fish["rarity"], discord.Color.default())
-                )
-                embed.add_field(name="名稱", value=selected_fish["name"], inline=False)
-                embed.add_field(name="重量", value=f"{selected_fish['size']} 公斤", inline=False)
-                embed.add_field(name="等級", value=selected_fish["rarity"].capitalize(), inline=False)
-                embed.add_field(name="操作", value="請選擇是否售出此漁獲。", inline=False)
-
-                sell_confirm_view = ConfirmSellView(selected_index)
-                await interaction.response.edit_message(embed=embed, view=sell_confirm_view)
-
-            select_menu.callback = select_fish_callback
-            self.add_item(select_menu)
-
-        def get_updated_embed(self):
-            embed = discord.Embed(
-                title="選擇漁獲進行販售",
-                description="點擊下方菜單選擇漁獲進行操作。",
-                color=discord.Color.blue()
-            )
-            if not user_fishes:
-                embed.description = "目前沒有漁獲可以販售！"
-                return embed
-
-            embed.set_footer(text=f"共 {len(user_fishes)} 條漁獲")
-            return embed
-
-    class ConfirmSellView(discord.ui.View):
-        def __init__(self, fish_index):
-            super().__init__(timeout=180)
-            self.fish_index = fish_index
-
-        @discord.ui.button(label="確認售出", style=discord.ButtonStyle.green)
-        async def confirm_sell(self, button: discord.ui.Button, interaction: discord.Interaction):
-            fish = user_fishes[self.fish_index]
-            rarity_prices = {
-                "common": (100, 10),
-                "uncommon": (350, 15),
-                "rare": (7400, 50),
-                "legendary": (450000, 100),
-                "deify": (3000000, 500),
-                "unknown": (100000000, 1000)
-            }
-            base_price, weight_multiplier = rarity_prices.get(fish["rarity"], (0, 0))
-            price = base_price + fish["size"] * weight_multiplier
-
-            balance_data.setdefault(guild_id, {}).setdefault(user_id, 0)
-            balance_data[guild_id][user_id] += price
-            user_fishes.remove(fish)
-
-            with open("fishiback.yml", "w", encoding="utf-8") as fishiback_file:
-                yaml.safe_dump(fishiback_data, fishiback_file, allow_unicode=True)
-
-            with open("balance.json", "w", encoding="utf-8") as balance_file:
-                json.dump(balance_data, balance_file, ensure_ascii=False, indent=4)
-
-            if not user_fishes:
-                await interaction.response.edit_message(
-                    content=f"成功售出 {fish['name']}，獲得幽靈幣 {price}！目前已無漁獲可販售。",
-                    embed=None, view=None
-                )
-                return
-
-            sell_view = FishSellView()
-            embed = sell_view.get_updated_embed()
-            await interaction.response.edit_message(
-                content=f"成功售出 {fish['name']}，獲得幽靈幣 {price}！",
-                embed=embed, view=sell_view
-            )
-            
-        @discord.ui.button(label="取消", style=discord.ButtonStyle.red)
-        async def cancel_sell(self, button: discord.ui.Button, interaction: discord.Interaction):
-            sell_view = FishSellView()
-            embed = sell_view.get_updated_embed()
-            await interaction.response.edit_message(
-                content="已取消販售，請選擇其他漁獲。",
-                embed=embed, view=sell_view
-            )
-
-    welcome_embed = discord.Embed(
-        title="歡迎來到漁獲商店",
-        description="在這裡您可以販售釣得的漁獲，換取幽靈幣！",
-        color=discord.Color.blue()
-    )
-    welcome_view = FishShopView()
-
-    await ctx.respond(embed=welcome_embed, view=welcome_view)
-
 @bot.slash_command(name="fish", description="進行一次釣魚")
-async def fish(ctx: discord.ApplicationContext):
+async def fish(ctx: ApplicationContext):
     try:
         with open("config.json", "r", encoding="utf-8") as config_file:
             fish_data = json.load(config_file)["fish"]
     except FileNotFoundError:
         await ctx.respond("配置文件 `config.json` 未找到！", ephemeral=True)
         return
-    except KeyError:
-        await ctx.respond("配置文件 `config.json` 格式错误！", ephemeral=True)
+    except (KeyError, json.JSONDecodeError):
+        await ctx.respond("配置文件 `config.json` 格式錯誤！", ephemeral=True)
         return
 
     user_id = str(ctx.user.id)
     guild_id = str(ctx.guild.id)
-
     current_rod = "魚竿"
 
     def generate_fish_data():
@@ -2708,7 +3167,6 @@ async def fish(ctx: discord.ApplicationContext):
         "deify": discord.Color.gold(),
         "unknown": discord.Color.dark_gray(),
     }
-    embed_color = rarity_colors.get(latest_fish_data["rarity"], discord.Color.light_gray())
 
     def create_fishing_embed(fish_data):
         embed = discord.Embed(
@@ -2724,66 +3182,81 @@ async def fish(ctx: discord.ApplicationContext):
 
     class FishingButtons(discord.ui.View):
         def __init__(self, author_id, fish_data):
-            super().__init__()
+            super().__init__(timeout=180)
             self.author_id = author_id
             self.latest_fish_data = fish_data
 
-        async def interaction_check(self, interaction: discord.Interaction):
+        async def interaction_check(self, interaction: Interaction):
             if interaction.user.id != self.author_id:
                 await interaction.response.send_message("這不是你的按鈕哦！", ephemeral=True)
                 return False
             return True
 
+        async def on_timeout(self):
+            try:
+                await ctx.edit(
+                    content="釣魚操作已超時，請重新開始！",
+                    embed=None,
+                    view=None
+                )
+            except discord.errors.NotFound:
+                pass
+
         @discord.ui.button(label="重複釣魚", style=discord.ButtonStyle.green)
-        async def repeat_fishing(self, button: discord.ui.Button, interaction: discord.Interaction):
-            button.disabled = True
-            button.label = "請稍候..."
-            await interaction.response.edit_message(view=self)
+        async def repeat_fishing(self, button: discord.ui.Button, interaction: Interaction):
+            try:
+                button.disabled = True
+                button.label = "釣魚中..."
+                await interaction.response.edit_message(view=self)
 
-            await asyncio.sleep(2)
+                await asyncio.sleep(2)
+                self.latest_fish_data = generate_fish_data()
+                new_embed = create_fishing_embed(self.latest_fish_data)
 
-            self.latest_fish_data = generate_fish_data()
-            new_embed = create_fishing_embed(self.latest_fish_data)
-
-            new_view = FishingButtons(self.author_id, self.latest_fish_data)
-            await interaction.edit_original_response(embed=new_embed, view=new_view)
+                new_view = FishingButtons(self.author_id, self.latest_fish_data)
+                await interaction.edit_original_response(embed=new_embed, view=new_view)
+            except discord.errors.NotFound:
+                await interaction.followup.send("交互已失效，請重新開始釣魚！", ephemeral=True)
+            except discord.errors.HTTPException as e:
+                await interaction.followup.send(f"釣魚失敗，請稍後重試！(錯誤: {e})", ephemeral=True)
 
         @discord.ui.button(label="保存漁獲", style=discord.ButtonStyle.blurple)
-        async def save_fish(self, button: discord.ui.Button, interaction: discord.Interaction):
+        async def save_fish(self, button: discord.ui.Button, interaction: Interaction):
             try:
-                with open("fishiback.yml", "r", encoding="utf-8") as fishiback_file:
-                    fishiback_data = yaml.safe_load(fishiback_file)
-            except FileNotFoundError:
-                fishiback_data = {}
+                button.disabled = True
+                button.label = "保存中..."
+                await interaction.response.edit_message(view=self)
 
-            if user_id not in fishiback_data:
-                fishiback_data[user_id] = {}
-            if guild_id not in fishiback_data[user_id]:
-                fishiback_data[user_id][guild_id] = {"fishes": []}
+                async with file_lock:
+                    try:
+                        with open("fishiback.yml", "r", encoding="utf-8") as fishiback_file:
+                            fishiback_data = yaml.safe_load(fishiback_file) or {}
+                    except (FileNotFoundError, yaml.YAMLError):
+                        fishiback_data = {}
 
-            fishiback_data[user_id][guild_id]["fishes"].append({
-                "name": self.latest_fish_data["name"],
-                "rarity": self.latest_fish_data["rarity"],
-                "size": self.latest_fish_data["size"],
-                "rod": current_rod
-            })
+                    fishiback_data.setdefault(user_id, {}).setdefault(guild_id, {"fishes": []})
+                    fishiback_data[user_id][guild_id]["fishes"].append({
+                        "name": self.latest_fish_data["name"],
+                        "rarity": self.latest_fish_data["rarity"],
+                        "size": self.latest_fish_data["size"],
+                        "rod": current_rod
+                    })
 
-            try:
-                with open("fishiback.yml", "w", encoding="utf-8") as fishiback_file:
-                    yaml.safe_dump(fishiback_data, fishiback_file, allow_unicode=True)
+                    with open("fishiback.yml", "w", encoding="utf-8") as fishiback_file:
+                        yaml.safe_dump(fishiback_data, fishiback_file, allow_unicode=True)
+
+                button.label = "已保存漁獲"
+                self.remove_item(button)
+                await interaction.edit_original_response(view=self)
+            except discord.errors.NotFound:
+                await interaction.followup.send("交互已失效，無法保存漁獲！", ephemeral=True)
+            except discord.errors.HTTPException as e:
+                await interaction.followup.send(f"保存漁獲失敗，請稍後重試！(錯誤: {e})", ephemeral=True)
             except Exception as e:
-                await interaction.response.send_message(f"保存渔获时出错：{e}", ephemeral=True)  # 增加异常处理
-                return
+                await interaction.followup.send(f"保存漁獲時發生錯誤：{e}", ephemeral=True)
 
-            button.disabled = True
-            button.label = "已保存漁獲"
-            self.remove_item(button)
-            await interaction.response.edit_message(view=self)
-
-    view = FishingButtons(ctx.user.id, latest_fish_data)
     embed = create_fishing_embed(latest_fish_data)
-
-    await ctx.respond(embed=embed, view=view)
+    await ctx.respond(embed=embed, view=FishingButtons(ctx.user.id, latest_fish_data))
 
 def load_fish_data():
     if not os.path.exists('fishiback.yml'):
@@ -2797,6 +3270,266 @@ def load_fish_data():
         fishing_data = {}
 
     return fishing_data
+
+def calculate_fish_price(fish):
+    rarity_prices = {
+        "common": (100, 10),
+        "uncommon": (350, 15),
+        "rare": (7400, 50),
+        "legendary": (450000, 100),
+        "deify": (3000000, 500),
+        "unknown": (100000000, 1000)
+    }
+    try:
+        base_price, weight_multiplier = rarity_prices.get(fish["rarity"], (0, 0))
+        size = float(fish["size"])
+        return int(base_price + size * weight_multiplier)
+    except (KeyError, ValueError, TypeError):
+        return 0
+
+@bot.slash_command(name="fish_shop", description="釣魚商店")
+@track_balance_json
+async def fish_shop(ctx: discord.ApplicationContext):
+    user_id = str(ctx.user.id)
+    guild_id = str(ctx.guild.id)
+
+    await ctx.defer()
+
+    async with file_lock:
+        try:
+            with open("fishiback.yml", "r", encoding="utf-8") as fishiback_file:
+                fishiback_data = yaml.safe_load(fishiback_file) or {}
+        except FileNotFoundError:
+            fishiback_data = {}
+
+    async with file_lock:
+        try:
+            with open("balance.json", "r", encoding="utf-8") as balance_file:
+                balance_data = json.load(balance_file) or {}
+        except (FileNotFoundError, json.JSONDecodeError):
+            balance_data = {}
+
+    user_fishes = fishiback_data.get(user_id, {}).get(guild_id, {}).get("fishes", [])
+    user_balance = balance_data.get(guild_id, {}).get(user_id, 0)
+
+    class FishShopView(discord.ui.View):
+        def __init__(self):
+            super().__init__(timeout=180)
+            self.original_user_id = ctx.user.id
+
+        @discord.ui.button(label="前往出售漁獲", style=discord.ButtonStyle.primary)
+        async def go_to_sell(self, button: discord.ui.Button, interaction: discord.Interaction):
+            if interaction.user.id != self.original_user_id:
+                await interaction.response.send_message("這不是你的商店，無法操作！", ephemeral=True)
+                return
+
+            if not user_fishes:
+                embed = discord.Embed(
+                    title="釣魚商店通知",
+                    description="您目前沒有漁獲可以販售！",
+                    color=discord.Color.red()
+                )
+                embed.set_footer(text="請繼續努力釣魚吧！")
+                await interaction.response.edit_message(embed=embed, view=None)
+                return
+
+            sell_view = FishSellView(self.original_user_id)
+            embed = sell_view.get_updated_embed()
+            await interaction.response.edit_message(embed=embed, view=sell_view)
+
+        async def on_timeout(self):
+            try:
+                await ctx.edit(content="商店已超時，請重新開啟。", embed=None, view=None)
+            except discord.errors.NotFound:
+                pass
+
+    class FishSellView(discord.ui.View):
+        def __init__(self, original_user_id, page=0):
+            super().__init__(timeout=180)
+            self.original_user_id = original_user_id
+            self.page = page
+            self.items_per_page = 25
+            self.update_options()
+
+        def update_options(self):
+            self.clear_items()
+            if not user_fishes:
+                self.add_item(discord.ui.Button(label="目前沒有漁獲可販售", style=discord.ButtonStyle.grey, disabled=True))
+                return
+
+            total_pages = (len(user_fishes) + self.items_per_page - 1) // self.items_per_page
+            start_idx = self.page * self.items_per_page
+            end_idx = min((self.page + 1) * self.items_per_page, len(user_fishes))
+            current_fishes = user_fishes[start_idx:end_idx]
+
+            select_menu = discord.ui.Select(
+                placeholder="選擇您要販售的漁獲",
+                options=[
+                    discord.SelectOption(
+                        label=f"{fish['name']} ({fish['rarity'].capitalize()})",
+                        description=f"重量: {fish['size']} 公斤 | 預計販售: {calculate_fish_price(fish)} 幽靈幣",
+                        value=str(start_idx + index)
+                    ) for index, fish in enumerate(current_fishes)
+                ]
+            )
+
+            async def select_fish_callback(interaction: discord.Interaction):
+                if interaction.user.id != self.original_user_id:
+                    await interaction.response.send_message("這不是你的商店，無法操作！", ephemeral=True)
+                    return
+
+                selected_index = int(select_menu.values[0])
+                selected_fish = user_fishes[selected_index]
+                price = calculate_fish_price(selected_fish)
+
+                rarity_colors = {
+                    "common": discord.Color.green(),
+                    "uncommon": discord.Color.blue(),
+                    "rare": discord.Color.purple(),
+                    "legendary": discord.Color.orange(),
+                    "deify": discord.Color.gold(),
+                    "unknown": discord.Color.light_grey()
+                }
+
+                embed = discord.Embed(
+                    title=f"選擇的漁獲: {selected_fish['name']}",
+                    color=rarity_colors.get(selected_fish["rarity"], discord.Color.default())
+                )
+                embed.add_field(name="名稱", value=selected_fish["name"], inline=False)
+                embed.add_field(name="重量", value=f"{selected_fish['size']} 公斤", inline=False)
+                embed.add_field(name="等級", value=selected_fish["rarity"].capitalize(), inline=False)
+                embed.add_field(name="預計販售價格", value=f"{price} 幽靈幣", inline=False)
+                embed.add_field(name="操作", value="請選擇是否售出此漁獲。", inline=False)
+
+                sell_confirm_view = ConfirmSellView(selected_index, self.original_user_id)
+                await interaction.response.edit_message(embed=embed, view=sell_confirm_view)
+
+            select_menu.callback = select_fish_callback
+            self.add_item(select_menu)
+
+            if self.page > 0:
+                prev_button = discord.ui.Button(label="上一頁", style=discord.ButtonStyle.grey)
+                async def prev_callback(interaction: discord.Interaction):
+                    if interaction.user.id != self.original_user_id:
+                        await interaction.response.send_message("這不是你的商店，無法操作！", ephemeral=True)
+                        return
+                    new_view = FishSellView(self.original_user_id, self.page - 1)
+                    embed = new_view.get_updated_embed()
+                    await interaction.response.edit_message(embed=embed, view=new_view)
+                prev_button.callback = prev_callback
+                self.add_item(prev_button)
+
+            if end_idx < len(user_fishes):
+                next_button = discord.ui.Button(label="下一頁", style=discord.ButtonStyle.grey)
+                async def next_callback(interaction: discord.Interaction):
+                    if interaction.user.id != self.original_user_id:
+                        await interaction.response.send_message("這不是你的商店，無法操作！", ephemeral=True)
+                        return
+                    new_view = FishSellView(self.original_user_id, self.page + 1)
+                    embed = new_view.get_updated_embed()
+                    await interaction.response.edit_message(embed=embed, view=new_view)
+                next_button.callback = next_callback
+                self.add_item(next_button)
+
+        def get_updated_embed(self):
+            embed = discord.Embed(
+                title="選擇漁獲進行販售",
+                description="點擊下方菜單選擇漁獲進行操作。",
+                color=discord.Color.blue()
+            )
+            if not user_fishes:
+                embed.description = "目前沒有漁獲可以販售！"
+            else:
+                total_pages = (len(user_fishes) + self.items_per_page - 1) // self.items_per_page
+                embed.set_footer(text=f"共 {len(user_fishes)} 條漁獲 | 第 {self.page + 1}/{total_pages} 頁")
+            return embed
+
+        async def on_timeout(self):
+            try:
+                await ctx.edit(content="販售介面已超時，請重新開啟。", embed=None, view=None)
+            except discord.errors.NotFound:
+                pass
+
+    class ConfirmSellView(discord.ui.View):
+        def __init__(self, fish_index, original_user_id):
+            super().__init__(timeout=180)
+            self.fish_index = fish_index
+            self.original_user_id = original_user_id
+
+        @discord.ui.button(label="確認售出", style=discord.ButtonStyle.green)
+        async def confirm_sell(self, button: discord.ui.Button, interaction: discord.Interaction):
+            if interaction.user.id != self.original_user_id:
+                await interaction.response.send_message("這不是你的商店，無法操作！", ephemeral=True)
+                return
+
+            nonlocal fishiback_data, balance_data, user_fishes
+            fish = user_fishes[self.fish_index]
+            price = calculate_fish_price(fish)
+
+            if price == 0:
+                await interaction.response.edit_message(
+                    content="漁獲資料錯誤，無法售出！", embed=None, view=None
+                )
+                return
+
+            balance_data.setdefault(guild_id, {}).setdefault(user_id, 0)
+            balance_data[guild_id][user_id] += price
+            user_fishes.pop(self.fish_index)
+
+            if user_id not in fishiback_data:
+                fishiback_data[user_id] = {}
+            if guild_id not in fishiback_data[user_id]:
+                fishiback_data[user_id][guild_id] = {}
+            fishiback_data[user_id][guild_id]["fishes"] = user_fishes
+
+            async with file_lock:
+                with open("fishiback.yml", "w", encoding="utf-8") as fishiback_file:
+                    yaml.safe_dump(fishiback_data, fishiback_file, allow_unicode=True)
+            async with file_lock:
+                with open("balance.json", "w", encoding="utf-8") as balance_file:
+                    json.dump(balance_data, balance_file, ensure_ascii=False, indent=4)
+
+            if not user_fishes:
+                await interaction.response.edit_message(
+                    content=f"成功售出 {fish['name']}，獲得幽靈幣 {price}！目前已無漁獲可販售。",
+                    embed=None, view=None
+                )
+                return
+
+            sell_view = FishSellView(self.original_user_id, 0)
+            embed = sell_view.get_updated_embed()
+            await interaction.response.edit_message(
+                content=f"成功售出 {fish['name']}，獲得幽靈幣 {price}！",
+                embed=embed, view=sell_view
+            )
+
+        @discord.ui.button(label="取消", style=discord.ButtonStyle.red)
+        async def cancel_sell(self, button: discord.ui.Button, interaction: discord.Interaction):
+            if interaction.user.id != self.original_user_id:
+                await interaction.response.send_message("這不是你的商店，無法操作！", ephemeral=True)
+                return
+
+            sell_view = FishSellView(self.original_user_id, 0)
+            embed = sell_view.get_updated_embed()
+            await interaction.response.edit_message(
+                content="已取消販售，請選擇其他漁獲。",
+                embed=embed, view=sell_view
+            )
+
+        async def on_timeout(self):
+            try:
+                await ctx.edit(content="確認介面已超時，請重新開啟。", embed=None, view=None)
+            except discord.errors.NotFound:
+                pass
+
+    welcome_embed = discord.Embed(
+        title="歡迎來到漁獲商店",
+        description="在這裡您可以販售釣得的漁獲，換取幽靈幣！",
+        color=discord.Color.blue()
+    )
+    welcome_view = FishShopView()
+
+    await ctx.edit(embed=welcome_embed, view=welcome_view)
 
 @bot.slash_command(name="fish_back", description="查看你的漁獲")
 async def fish_back(interaction: discord.Interaction):
@@ -2856,12 +3589,12 @@ async def draw_lots_command(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed, ephemeral=False)
 
-@bot.slash_command(name="quiz", description="進行問答挑戰！")
-async def quiz(ctx: discord.ApplicationContext):
+@bot.slash_command(name="quiz", description="幽幽子邀你來場問答挑戰哦～")
+async def quiz(ctx: ApplicationContext):
     quiz_data = load_yaml("quiz.yml", default={"questions": []})
 
     if not quiz_data["questions"]:
-        return await ctx.respond("❌ 題庫中沒有任何問題！")
+        return await ctx.respond("❌ 哎呀，題庫空空的，就像幽靈肚子一樣！")
 
     question_data = random.choice(quiz_data["questions"])
     question = question_data["question"]
@@ -2869,38 +3602,49 @@ async def quiz(ctx: discord.ApplicationContext):
     incorrect_answers = question_data["incorrect"]
 
     if len(incorrect_answers) != 3:
-        return await ctx.respond("❌ `quiz.yml` 格式錯誤，請確保每題有 1 個正確答案和 3 個錯誤答案！")
+        return await ctx.respond("❌ 嗯？題目好像少了點什麼，幽幽子數數要三個錯的才對嘛！")
 
     options = [correct_answer] + incorrect_answers
     random.shuffle(options)
 
     embed = discord.Embed(
-        title="🧠 問答時間！",
-        description=question,
-        color=discord.Color.gold()
+        title="🪭 幽幽子的問答時間～",
+        description=f"「{question}」\n嘻嘻，這可不好猜呢～快選一個吧！",
+        color=discord.Color.from_rgb(255, 182, 193)
     )
-    embed.set_footer(text="請點擊按鈕選擇答案")
+    embed.set_footer(text="幽靈的謎題只有30秒哦～")
 
     class QuizView(discord.ui.View):
-        def __init__(self):
+        def __init__(self, interaction: Interaction):
             super().__init__(timeout=30)
+            self.interaction = interaction
             self.answered = False
             for option in options:
                 self.add_item(QuizButton(option))
 
+        async def on_timeout(self):
+            if self.answered:
+                return
+            embed.color = discord.Color.dark_grey()
+            embed.description = f"{question}\n\n⏳ 「時間到了呢～」幽幽子飄走了，正確答案是 `{correct_answer}`！"
+            for child in self.children:
+                child.disabled = True
+            await self.interaction.edit_original_response(embed=embed, view=self)
+
     class QuizButton(discord.ui.Button):
         def __init__(self, label):
-            super().__init__(label=label, style=discord.ButtonStyle.primary)
+            super().__init__(label=label, style=discord.ButtonStyle.secondary)
             self.is_correct = label == correct_answer
 
-        async def callback(self, interaction: discord.Interaction):
+        async def callback(self, interaction: Interaction):
             if interaction.user != ctx.author:
-                return await interaction.response.send_message("❌ 你不能回答這個問題！", ephemeral=True)
+                return await interaction.response.send_message("❌ 哎呀，這是給別人的謎題哦～", ephemeral=True)
 
             if self.view.answered:
-                return await interaction.response.send_message("⏳ 這題已經有人作答過了！", ephemeral=True)
+                return await interaction.response.send_message("⏳ 這題已經解開啦，幽靈不會重複問哦！", ephemeral=True)
 
             self.view.answered = True
+            self.view.stop()
 
             for child in self.view.children:
                 child.disabled = True
@@ -2911,14 +3655,14 @@ async def quiz(ctx: discord.ApplicationContext):
 
             if self.is_correct:
                 embed.color = discord.Color.green()
-                embed.description = f"{question}\n\n✅ **答對了！** 🎉"
+                embed.description = f"{question}\n\n✅ 「嘻嘻，答對了呢～」幽幽子為你鼓掌！🎉"
             else:
                 embed.color = discord.Color.red()
-                embed.description = f"{question}\n\n❌ **錯誤！** 正確答案是 `{correct_answer}`"
+                embed.description = f"{question}\n\n❌ 「哎呀，錯啦～」正確答案是 `{correct_answer}`，下次再來哦！"
 
             await interaction.response.edit_message(embed=embed, view=self.view)
 
-    await ctx.respond(embed=embed, view=QuizView())
+    await ctx.respond(embed=embed, view=QuizView(ctx.interaction))
 
 @bot.slash_command(name="rpg-start", description="初始化你的rpg數據")
 async def rpg_start(ctx: discord.ApplicationContext):
