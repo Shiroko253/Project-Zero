@@ -15,11 +15,12 @@ import yaml
 import psutil
 import requests
 import sqlite3
-import openai
+import openai # -v 0.28
+import math
 from discord.ext import commands
 from discord.ui import View, Button, Select
 from discord import ui
-from discord import ApplicationContext, Interaction
+from discord import Embed, ApplicationContext, Interaction, ButtonStyle
 from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 from urllib.parse import urlencode
@@ -36,8 +37,10 @@ AUTHOR_ID = int(os.getenv('AUTHOR_ID', 0))
 LOG_FILE_PATH = "feedback_log.txt"
 WORK_COOLDOWN_SECONDS = 60
 API_URL = 'https://api.chatanywhere.org/v1/'
+
 api_keys = [
-    {"key": os.getenv('CHATANYWHERE_API'), "limit": 200, "remaining": 200}
+    {"key": os.getenv('CHATANYWHERE_API'), "limit": 200, "remaining": 200},
+    {"key": os.getenv('CHATANYWHERE_API2'), "limit": 200, "remaining": 200}
 ]
 current_api_index = 0
 
@@ -104,10 +107,8 @@ shop_data = config.get("shop_item", {})
 user_data = load_yaml("config_user.yml")
 quiz_data = load_yaml('quiz.yml')
 dm_messages = load_json('dm_messages.json')
-questions = load_yaml('trivia_questions.yml', {}).get('questions', [])
-user_rod = load_yaml('user_rod.yml', {})
 user_balance = load_json('balance.json')
-invalid_bet_count = load_json("invalid_bet_count.json")
+invalid_bet_count = load_json('invalid_bet_count.json')
 
 if not jobs_data:
     print("警告: 職業數據 (jobs) 為空！請檢查 config.json 文件。")
@@ -115,12 +116,6 @@ if not fish_data:
     print("警告: 魚類數據 (fish) 為空！請檢查 config.json 文件。")
 if not shop_data:
     print("警告: 商店數據 (shop_item) 為空！請檢查 config.json 文件。")
-
-if not os.path.exists('user_rod.yml'):
-    save_yaml('user_rod.yml', {})
-
-def get_random_question():
-    return random.choice(questions) if questions else None
 
 cooldowns = {}
 active_giveaways = {}
@@ -180,7 +175,7 @@ CHECK_INTERVAL = 3
 DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
 def load_status():
-    """讀取機器人的斷線記錄"""
+    """從冥界卷軸中讀取幽幽子的斷線記憶"""
     try:
         with open("bot_status.json", "r", encoding="utf-8") as f:
             return json.load(f)
@@ -188,7 +183,7 @@ def load_status():
         return {"disconnect_count": 0, "reconnect_count": 0, "last_event_time": None}
 
 def save_status(disconnects=None, reconnects=None):
-    """儲存機器人的斷線記錄"""
+    """將幽幽子的斷線記錄刻入冥界卷軸"""
     data = load_status()
     if disconnects is not None:
         data["disconnect_count"] += disconnects
@@ -200,29 +195,29 @@ def save_status(disconnects=None, reconnects=None):
         json.dump(data, f, indent=4, ensure_ascii=False)
 
 async def check_long_disconnect():
-    """監控機器人是否長時間無法重新連接"""
+    """監控幽幽子是否長時間迷失於冥界之外"""
     global last_disconnect_time
 
     while True:
         if last_disconnect_time:
             elapsed = (datetime.now() - last_disconnect_time).total_seconds()
             if elapsed > MAX_DOWN_TIME:
-                await send_alert_async(f"⚠️ 警告：機器人已斷線超過 {MAX_DOWN_TIME} 秒，可能是伺服器網絡問題！")
+                await send_alert_async(f"⚠️ 【警告】幽幽子已迷失於現世之外超過 {MAX_DOWN_TIME} 秒，冥界之風是否斷絕？")
                 last_disconnect_time = None
         await asyncio.sleep(CHECK_INTERVAL)
 
 async def send_alert_async(message):
-    """使用 Discord Webhook 發送警報（異步 + 重試機制，改為嵌入格式）"""
+    """以幽幽子的靈魂之音發送警報至現世"""
     if not DISCORD_WEBHOOK_URL:
-        print("❌ [錯誤] 未設置 Webhook URL，無法發送警報。")
+        print("❌ 【錯誤】幽幽子找不到通往現世的櫻花路，警報無法傳達～")
         return
 
     embed = {
-        "title": "🚨 警報通知 🚨",
+        "title": "🚨 【冥界警報】幽幽子的低語 🚨",
         "description": f"📢 {message}",
         "color": 0xFFA500,
         "timestamp": datetime.now().isoformat(),
-        "footer": {"text": "⚠️ 自動警報系統"}
+        "footer": {"text": "⚠️ 來自冥界的警示～"}
     }
 
     data = {"embeds": [embed]}
@@ -232,26 +227,26 @@ async def send_alert_async(message):
             async with aiohttp.ClientSession() as session:
                 async with session.post(DISCORD_WEBHOOK_URL, json=data, timeout=5) as response:
                     if 200 <= response.status < 300:
-                        print("✅ [通知] 警報已發送到 Discord。")
+                        print("✅ 【訊息】幽幽子的警報已順利傳至現世～")
                         return
                     else:
-                        print(f"⚠️ [警告] Webhook 發送失敗（狀態碼: {response.status}），回應: {await response.text()}")
+                        print(f"⚠️ 【警告】Webhook 發送失敗（狀態碼: {response.status}），回應: {await response.text()}")
 
         except asyncio.TimeoutError:
-            print(f"⚠️ [重試 {attempt}/{MAX_RETRIES}] 發送 Webhook 超時，{RETRY_DELAY} 秒後重試...")
+            print(f"⚠️ 【重試 {attempt}/{MAX_RETRIES}】發送警報超時，{RETRY_DELAY} 秒後重試～")
         except aiohttp.ClientConnectionError:
-            print(f"⚠️ [重試 {attempt}/{MAX_RETRIES}] 無法連接 Discord Webhook，{RETRY_DELAY} 秒後重試...")
+            print(f"⚠️ 【重試 {attempt}/{MAX_RETRIES}】冥界與現世之間的橋梁中斷，{RETRY_DELAY} 秒後重試～")
         except Exception as e:
-            print(f"❌ [錯誤] 無法發送 Webhook: {e}")
+            print(f"❌ 【錯誤】幽幽子的警報迷失，無法發送警報：{e}")
             break
 
         await asyncio.sleep(RETRY_DELAY)
 
-    print("❌ [錯誤] 多次重試後仍然無法發送 Webhook，請檢查網絡連接。")
+    print("❌ 【錯誤】幽幽子多次呼喚無果，請檢查冥界之門是否關閉～")
 
 @bot.event
 async def on_disconnect():
-    """當機器人斷線時記錄事件"""
+    """當幽幽子與現世失去聯繫時"""
     global disconnect_count, last_disconnect_time
 
     disconnect_count += 1
@@ -259,19 +254,19 @@ async def on_disconnect():
 
     save_status(disconnects=1)
 
-    print(f"[警告] 機器人於 {last_disconnect_time.strftime('%Y-%m-%d %H:%M:%S')} 斷線。（第 {disconnect_count} 次）")
+    print(f"⚠️ 【警告】幽幽子於 {last_disconnect_time.strftime('%Y-%m-%d %H:%M:%S')} 迷失於現世之外。（第 {disconnect_count} 次）")
 
     if disconnect_count >= MAX_DISCONNECTS:
-        asyncio.create_task(send_alert_async(f"⚠️ 機器人短時間內已斷線 {disconnect_count} 次！"))
+        asyncio.create_task(send_alert_async(f"⚠️ 【警告】幽幽子短時間內已迷失 {disconnect_count} 次，冥界之風是否消散？"))
 
 @bot.event
 async def on_resumed():
-    """當機器人重新連接時記錄事件"""
+    """當幽幽子重新飄回現世時"""
     global disconnect_count, last_disconnect_time
 
     save_status(reconnects=1)
 
-    print(f"[訊息] 機器人於 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 重新連接。")
+    print(f"🌸 【訊息】幽幽子於 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} 重返現世，冥界之風再次吹起～")
 
     disconnect_count = 0
     last_disconnect_time = None
@@ -325,9 +320,9 @@ def record_message(user_id, message):
     except sqlite3.Error as e:
         print(f"Database error: {e}")
 
-def clean_old_messages(minutes=20):
+def clean_old_messages(minutes=30):
     try:
-        with sqlite3.connect("example3.db") as conn:
+        with sqlite3.connect("example.db") as conn:
             c = conn.cursor()
             time_ago = datetime.now(timezone.utc) - timedelta(minutes=minutes)
             c.execute("""
@@ -336,6 +331,7 @@ def clean_old_messages(minutes=20):
             """, (time_ago,))
             deleted_rows = c.rowcount
             conn.commit()
+            print(f"已刪除 {deleted_rows} 條舊訊息")
             return deleted_rows
     except sqlite3.Error as e:
         print(f"資料庫錯誤: {e}")
@@ -345,57 +341,75 @@ def summarize_context(context):
     return context[:1500]
 
 def generate_response(prompt, user_id):
-    try:
-        openai.api_base = API_URL
-        openai.api_key = os.getenv('CHATANYWHERE_API')
+    global current_api_index
+    global api_keys
 
-        conn = sqlite3.connect("example.db")
-        c = conn.cursor()
-        c.execute("""
-            SELECT message FROM UserMessages 
-            WHERE user_id = ? OR user_id = 'system'
-        """, (user_id,))
-        context = "\n".join([f"{user_id}說 {row[0]}" for row in c.fetchall()])
-        conn.close()
+    tried_all_apis = False
+    original_index = current_api_index
 
-        user_background_info = get_user_background_info("西行寺 幽幽子")
-        if not user_background_info:
-            updated_background_info = (
-                "我是西行寺幽幽子，白玉樓的主人，幽靈公主。"
-                "生前因擁有『操縱死亡的能力』，最終選擇自盡，被埋葬於西行妖之下，化為幽靈。"
-                "現在，我悠閒地管理著冥界，欣賞四季變換，品味美食，偶爾捉弄妖夢。"
-                "雖然我的話語總是輕飄飄的，但生與死的流轉，皆在我的掌握之中。"
-                "啊，還有，請不要吝嗇帶點好吃的來呢～"
-            )
+    while True:
+        try:
+            if api_keys[current_api_index]["remaining"] <= 0:
+                print(f"API {current_api_index} 已用盡")
+                current_api_index = (current_api_index + 1) % len(api_keys)
+                if current_api_index == original_index:
+                    tried_all_apis = True
+                if tried_all_apis:
+                    return "幽幽子今天吃太飽，先午睡一下吧～"
+
+            openai.api_base = API_URL
+            openai.api_key = api_keys[current_api_index]["key"]
+
             conn = sqlite3.connect("example.db")
             c = conn.cursor()
             c.execute("""
-                INSERT INTO BackgroundInfo (user_id, info) VALUES (?, ?)
-            """, ("西行寺 幽幽子", updated_background_info))
-            conn.commit()
+                SELECT message FROM UserMessages 
+                WHERE user_id = ? OR user_id = 'system'
+            """, (user_id,))
+            context = "\n".join([f"{user_id}說 {row[0]}" for row in c.fetchall()])
             conn.close()
-        else:
-            updated_background_info = user_background_info
 
-        if len(context.split()) > 3000:
-            context = summarize_context(context)
+            user_background_info = get_user_background_info("西行寺 幽幽子")
+            if not user_background_info:
+                updated_background_info = (
+                    "我是西行寺幽幽子，白玉樓的主人，幽靈公主。"
+                    "生前因擁有『操縱死亡的能力』，最終選擇自盡，被埋葬於西行妖之下，化為幽靈。"
+                    "現在，我悠閒地管理著冥界，欣賞四季變換，品味美食，偶爾捉弄妖夢。"
+                    "雖然我的話語總是輕飄飄的，但生與死的流轉，皆在我的掌握之中。"
+                    "啊，還有，請不要吝嗇帶點好吃的來呢～"
+                )
+                conn = sqlite3.connect("example.db")
+                c = conn.cursor()
+                c.execute("""
+                    INSERT INTO BackgroundInfo (user_id, info) VALUES (?, ?)
+                """, ("西行寺 幽幽子", updated_background_info))
+                conn.commit()
+                conn.close()
+            else:
+                updated_background_info = user_background_info
 
-        messages = [
-            {"role": "system", "content": f"你現在是西行寺幽幽子，冥界的幽靈公主，背景資訊：{updated_background_info}"},
-            {"role": "user", "content": f"{user_id}說 {prompt}"},
-            {"role": "assistant", "content": f"已知背景資訊：\n{context}"}
-        ]
+            if len(context.split()) > 3000:
+                context = summarize_context(context)
 
-        response = openai.ChatCompletion.create(
-            model="gpt-4o-mini",
-            messages=messages
-        )
+            messages = [
+                {"role": "system", "content": f"你現在是西行寺幽幽子，冥界的幽靈公主，背景資訊：{updated_background_info}"},
+                {"role": "user", "content": f"{user_id}說 {prompt}"},
+                {"role": "assistant", "content": f"已知背景資訊：\n{context}"}
+            ]
 
-        return response['choices'][0]['message']['content'].strip()
+            response = openai.ChatCompletion.create(
+                model="gpt-4o-mini",
+                messages=messages
+            )
 
-    except Exception as e:
-        print(f"API 發生錯誤: {str(e)}")
-        return "幽幽子現在有點懶洋洋的呢～等會兒再來吧♪"
+            api_keys[current_api_index]["remaining"] -= 1
+            return response['choices'][0]['message']['content'].strip()
+
+        except Exception as e:
+            print(f"API {current_api_index} 發生錯誤: {str(e)}")
+            current_api_index = (current_api_index + 1) % len(api_keys)
+            if current_api_index == original_index:
+                return "幽幽子現在有點懶洋洋的呢～等會兒再來吧♪"
 
 def get_user_background_info(user_id):
     conn = sqlite3.connect("example.db")
@@ -409,18 +423,27 @@ def get_user_background_info(user_id):
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-async def send_global_webhook_message(content, color=discord.Color.green()):
-    """ 發送全局 Webhook 消息到 Discord """
+async def send_global_webhook_message(content, color=discord.Color.from_rgb(219, 112, 147)):
+    """🌸 讓幽幽子的靈魂之音輕飄至現世～"""
     if not WEBHOOK_URL:
-        print("Webhook URL 未設置，跳過通知")
+        print("❌ 幽幽子找不到通往現世的路，通知無法傳達～")
         return
 
-    embed = discord.Embed(description=content, color=color)
-    embed.set_footer(text="Bot 狀態通知")
+    embed = discord.Embed(
+        title="🌸 幽幽子的飄渺呢喃",
+        description=content,
+        color=color,
+        timestamp=datetime.now(timezone.utc)
+    )
+    embed.set_footer(text="來自冥界的微風與魂魄之語～", icon_url="https://i.imgur.com/oBPXxpv.png")
 
-    async with aiohttp.ClientSession() as session:
-        webhook = discord.Webhook.from_url(WEBHOOK_URL, session=session)
-        await webhook.send(embed=embed)
+    try:
+        async with aiohttp.ClientSession() as session:
+            webhook = discord.Webhook.from_url(WEBHOOK_URL, session=session)
+            await webhook.send(embed=embed)
+            print("✅ 幽幽子的呢喃已飄至現世～")
+    except Exception as e:
+        print(f"❌ 幽幽子的聲音受阻：{e}")
 
 @bot.event
 async def on_message(message):
@@ -465,29 +488,6 @@ async def on_message(message):
     
     if '幽幽子的生日' in message.content.lower():
         await message.channel.send('機器人幽幽子的生日在<t:1623245700:D>')
-    
-    if message.content.startswith('關閉幽幽子'):
-        if message.author.id == AUTHOR_ID:
-            await message.channel.send("正在關閉...")
-            await send_global_webhook_message("🔴 **機器人即將關機**", discord.Color.red())
-            await asyncio.sleep(3)
-            await bot.close()
-            return
-        else:
-            await message.channel.send("你無權關閉我 >_< ")
-            return
-
-    elif message.content.startswith('重啓幽幽子'):
-        if message.author.id == AUTHOR_ID:
-            await message.channel.send("正在重啟幽幽子...")
-            await send_global_webhook_message("🔄 **機器人即將重啟...**", discord.Color.orange())
-            await asyncio.sleep(3)
-            subprocess.Popen([sys.executable, os.path.abspath(__file__)])
-            await bot.close()
-            return
-        else:
-            await message.channel.send("你無權重啓我 >_< ")
-            return
 
     if '幽幽子待機多久了' in message.content.lower():
         current_time = time.time()
@@ -713,6 +713,105 @@ async def on_ready():
     bot.loop.create_task(check_long_disconnect())
     
     init_db()
+
+@bot.slash_command(name="join", description="讓幽幽子飄進你的語音頻道哦～")
+async def join(ctx: ApplicationContext):
+    """讓幽幽子輕輕飄進使用者的語音頻道，只有特定的人能喚我哦～"""
+    # Defer the response to avoid interaction timeout
+    await ctx.defer(ephemeral=True)  # Use ephemeral=True if you want the "Bot is thinking..." message to be private
+
+    # 檢查權限
+    if ctx.author.id != AUTHOR_ID:
+        embed = Embed(
+            description="哎呀～你不是能喚我的人呢，這份櫻花餅不給你吃哦～",
+            color=0xFFB6C1  # 粉色 LightPink
+        )
+        await ctx.followup.send(embed=embed, ephemeral=True)
+        return
+
+    # 檢查使用者是否在語音頻道
+    if not ctx.author.voice:
+        embed = Embed(
+            description="嗯？你沒在語音頻道裡呀～幽幽子可不會自己找地方飄哦～",
+            color=0xFFB6C1
+        )
+        await ctx.followup.send(embed=embed, ephemeral=True)
+        return
+
+    # 獲取語音頻道並檢查權限
+    channel = ctx.author.voice.channel
+    if not channel.permissions_for(ctx.guild.me).connect:
+        embed = Embed(
+            description="哎呀～這個頻道不歡迎幽幽子呢，沒法飄進去啦～",
+            color=0xFFB6C1
+        )
+        await ctx.followup.send(embed=embed, ephemeral=True)
+        return
+
+    # 加入或移動到頻道
+    voice_client = ctx.voice_client
+    try:
+        if voice_client:
+            await voice_client.move_to(channel)
+            action = "飄到了"
+        else:
+            await channel.connect()
+            action = "輕輕飄進了"
+    except discord.ClientException as e:
+        embed = Embed(
+            description=f"哎呀呀～飄不進去呢，因為 {e}，櫻花都掉了～",
+            color=0xFFB6C1
+        )
+        await ctx.followup.send(embed=embed, ephemeral=True)
+        return
+
+    # 成功回應，用 bot 頭像
+    embed = Embed(
+        description=f"幽幽子我{action} {channel.name} 啦～有沒有好吃的等著我呀？",
+        color=0xFFB6C1
+    )
+    embed.set_thumbnail(url=ctx.bot.user.avatar.url)  # 直接用 bot 頭像
+    await ctx.followup.send(embed=embed)
+
+@bot.slash_command(name="leave", description="讓幽幽子飄離語音頻道啦～")
+async def leave(ctx: ApplicationContext):
+    """讓幽幽子從語音頻道飄走，只有特定的人能趕我走哦～"""
+    # 檢查權限
+    if ctx.author.id != AUTHOR_ID:
+        embed = Embed(
+            description="嘻嘻～你不是能趕走我的人哦，幽幽子還想多吃點呢～",
+            color=0xFFB6C1
+        )
+        await ctx.respond(embed=embed, ephemeral=True)
+        return
+
+    # 檢查機器人是否在語音頻道
+    voice_client = ctx.voice_client
+    if not voice_client:
+        embed = Embed(
+            description="咦？我還沒飄進任何頻道呢，怎麼趕我走呀～",
+            color=0xFFB6C1
+        )
+        await ctx.respond(embed=embed, ephemeral=True)
+        return
+
+    # 離開頻道
+    try:
+        await voice_client.disconnect()
+        embed = Embed(
+            description="好吧～幽幽子飄走啦，掰掰～下次記得多準備點點心哦～",
+            color=0xFFB6C1
+        )
+        embed.set_thumbnail(url=ctx.bot.user.avatar.url)  # 直接用 bot 頭像
+    except discord.ClientException as e:
+        embed = Embed(
+            description=f"哎呀～飄不出去呢，因為 {e}，櫻花餅都沒吃完～",
+            color=0xFFB6C1
+        )
+        await ctx.respond(embed=embed, ephemeral=True)
+        return
+
+    await ctx.respond(embed=embed)
 
 @bot.slash_command(name="invite", description="生成幽幽子的邀請鏈接，邀她共舞於你的伺服器")
 async def invite(ctx: discord.ApplicationContext):
@@ -1675,7 +1774,6 @@ async def about_me(ctx: discord.ApplicationContext):
     await ctx.respond(embed=embed)
 
 @bot.slash_command(name="balance", description="幽幽子為你窺探幽靈幣的數量～")
-@track_balance_json
 async def balance(ctx: discord.ApplicationContext):
     def format_number(num):
         if num >= 1e20:
@@ -1766,7 +1864,7 @@ async def leaderboard(ctx: discord.ApplicationContext):
             return f"{num / 1e8:.2f} 億"
         else:
             return f"{num:.2f}"
-            
+
     if not ctx.guild:
         await ctx.respond("此命令只能在伺服器中使用。", ephemeral=True)
         return
@@ -1844,26 +1942,259 @@ async def leaderboard(ctx: discord.ApplicationContext):
     embed.set_footer(text="排行榜僅顯示前 10 名")
     await ctx.followup.send(embed=embed)
         
-@bot.slash_command(name="shop", description="查看商店中的商品列表")
+@bot.slash_command(name="shop", description="🌸 來逛逛幽幽子的夢幻商店吧～")
 async def shop(ctx: discord.ApplicationContext):
     guild_id = str(ctx.guild.id)
     user_id = str(ctx.author.id)
 
     if not shop_data:
-        await ctx.respond("商店數據加載失敗，請使用**`/feedback`**指令回報問題！", ephemeral=True)
+        await ctx.respond("商店數據載入失敗了呢～請使用 `/feedback` 回報喔！", ephemeral=True)
         return
+
+    ITEMS_PER_PAGE = 25
+    total_pages = math.ceil(len(shop_data) / ITEMS_PER_PAGE)
+    current_page = 0
+
+    class ShopView(View):
+        def __init__(self, page):
+            super().__init__(timeout=60)
+            self.page = page
+            self.add_item(self.create_select_menu())
+
+            if page > 0:
+                self.add_item(self.prev_button())
+            if page < total_pages - 1:
+                self.add_item(self.next_button())
+
+        def create_select_menu(self):
+            start = self.page * ITEMS_PER_PAGE
+            end = start + ITEMS_PER_PAGE
+            options = [
+                discord.SelectOption(
+                    label=item["name"],
+                    description=f"價格: {item['price']} + 稅: {item['tax']}, MP: {item['MP']}",
+                    value=item["name"]
+                )
+                for item in shop_data[start:end]
+            ]
+
+            select_menu = Select(
+                placeholder="✨ 請選擇想要購買的商品～",
+                options=options,
+                min_values=1,
+                max_values=1
+            )
+            select_menu.callback = self.select_callback
+            return select_menu
+
+        def prev_button(self):
+            prev_button = Button(label="⬅️ 上一頁", style=discord.ButtonStyle.primary)
+            prev_button.callback = self.prev_callback
+            return prev_button
+
+        def next_button(self):
+            next_button = Button(label="➡️ 下一頁", style=discord.ButtonStyle.primary)
+            next_button.callback = self.next_callback
+            return next_button
+
+        async def select_callback(self, interaction: discord.Interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("這不是你的選擇喔～", ephemeral=True)
+                return
+
+            selected_item_name = interaction.data["values"][0]
+            selected_item = next((item for item in shop_data if item["name"] == selected_item_name), None)
+
+            if selected_item:
+                total_price = selected_item["price"] + selected_item["tax"]
+
+                embed = discord.Embed(
+                    title="🌸 購買確認",
+                    description=(f"您選擇了 **{selected_item_name}**～\n"
+                                 f"價格：{selected_item['price']} 幽靈幣\n"
+                                 f"稅金：{selected_item['tax']} 幽靈幣\n"
+                                 f"心理壓力 (MP)：{selected_item['MP']}\n"
+                                 f"總價格：**{total_price}** 幽靈幣"),
+                    color=0xFFB6C1
+                )
+
+                confirm_view = View(timeout=30)
+                confirm_button = Button(label="✅ 確認購買", style=discord.ButtonStyle.success)
+                cancel_button = Button(label="❌ 取消", style=discord.ButtonStyle.danger)
+
+                async def confirm_callback(interaction: discord.Interaction):
+                    if interaction.user.id != ctx.author.id:
+                        await interaction.response.send_message("這不是你的選擇喔～", ephemeral=True)
+                        return
+
+                    user_balance = load_json('balance.json')
+                    user_balance.setdefault(guild_id, {})
+                    user_balance[guild_id].setdefault(user_id, 0)
+                    current_balance = user_balance[guild_id][user_id]
+
+                    if current_balance >= total_price:
+                        user_balance[guild_id][user_id] -= total_price
+                        save_json('balance.json', user_balance)
+
+                        embed = discord.Embed(
+                            title="🌸 商品處理",
+                            description=f"您購買了 **{selected_item_name}**！\n請選擇：存入背包還是直接食用？",
+                            color=0xFFB6C1
+                        )
+
+                        choice_view = View(timeout=30)
+                        backpack_button = Button(label="🎒 存入背包", style=discord.ButtonStyle.primary)
+                        use_button = Button(label="🍽️ 直接食用", style=discord.ButtonStyle.secondary)
+
+                        async def backpack_callback(interaction: discord.Interaction):
+                            if interaction.user.id != ctx.author.id:
+                                await interaction.response.send_message("這不是你的選擇喔～", ephemeral=True)
+                                return
+
+                            user_data = load_yaml('config_user.yml')
+                            user_data.setdefault(guild_id, {})
+                            user_data[guild_id].setdefault(user_id, {"MP": 200, "backpack": []})
+
+                            user_data[guild_id][user_id]["backpack"].append({
+                                "name": selected_item["name"],
+                                "price": selected_item["price"],
+                                "tax": selected_item["tax"],
+                                "MP": selected_item["MP"]
+                            })
+
+                            save_yaml('config_user.yml', user_data)
+
+                            await interaction.response.edit_message(
+                                content=f"✨ **{selected_item_name}** 已存入背包！",
+                                embed=None, view=None
+                            )
+
+                        async def use_callback(interaction: discord.Interaction):
+                            if interaction.user.id != ctx.author.id:
+                                await interaction.response.send_message("這不是你的選擇喔～", ephemeral=True)
+                                return
+
+                            user_data = load_yaml('config_user.yml')
+                            user_data.setdefault(guild_id, {})
+                            user_data[guild_id].setdefault(user_id, {"MP": 200, "backpack": []})
+
+                            user_data[guild_id][user_id]["MP"] = max(
+                                0, user_data[guild_id][user_id]["MP"] - selected_item["MP"]
+                            )
+
+                            save_yaml('config_user.yml', user_data)
+
+                            await interaction.response.edit_message(
+                                content=f"🍽️ 你食用了 **{selected_item_name}**，心理壓力（MP）下降了 {selected_item['MP']} 點！",
+                                embed=None, view=None
+                            )
+
+                        backpack_button.callback = backpack_callback
+                        use_button.callback = use_callback
+                        choice_view.add_item(backpack_button)
+                        choice_view.add_item(use_button)
+
+                        await interaction.response.edit_message(embed=embed, view=choice_view)
+                    else:
+                        await interaction.response.edit_message(
+                            content="幽靈幣不足呢～要不要再努力賺一點？💸", embed=None, view=None
+                        )
+
+                async def cancel_callback(interaction: discord.Interaction):
+                    if interaction.user.id != ctx.author.id:
+                        await interaction.response.send_message("這不是你的選擇喔～", ephemeral=True)
+                        return
+                    await interaction.response.edit_message(
+                        content="已取消購買呢～♪", embed=None, view=None
+                    )
+
+                confirm_button.callback = confirm_callback
+                cancel_button.callback = cancel_callback
+                confirm_view.add_item(confirm_button)
+                confirm_view.add_item(cancel_button)
+
+                await interaction.response.edit_message(embed=embed, view=confirm_view)
+
+        async def prev_callback(self, interaction: discord.Interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("這不是你的選擇喔～", ephemeral=True)
+                return
+            self.page -= 1
+            self.clear_items()
+            self.add_item(self.create_select_menu())
+            if self.page > 0:
+                self.add_item(self.prev_button())
+            if self.page < total_pages - 1:
+                self.add_item(self.next_button())
+            embed = discord.Embed(
+                title=f"🌸 商店 - 第 {self.page+1}/{total_pages} 頁",
+                description="選擇想購買的商品吧～✨",
+                color=0xFFB6C1
+            )
+            await interaction.response.edit_message(embed=embed, view=self)
+
+        async def next_callback(self, interaction: discord.Interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("這不是你的選擇喔～", ephemeral=True)
+                return
+            self.page += 1
+            self.clear_items()
+            self.add_item(self.create_select_menu())
+            if self.page > 0:
+                self.add_item(self.prev_button())
+            if self.page < total_pages - 1:
+                self.add_item(self.next_button())
+            embed = discord.Embed(
+                title=f"🌸 商店 - 第 {self.page+1}/{total_pages} 頁",
+                description="選擇想購買的商品吧～✨",
+                color=0xFFB6C1
+            )
+            await interaction.response.edit_message(embed=embed, view=self)
+
+        async def on_timeout(self):
+            for item in self.children:
+                item.disabled = True
+            await self.message.edit(content="商店已超時，請重新開啟！", embed=None, view=self)
+
+    embed = discord.Embed(
+        title=f"🌸 商店 - 第 {current_page+1}/{total_pages} 頁",
+        description="選擇想購買的商品吧～✨",
+        color=0xFFB6C1
+    )
+    view = ShopView(current_page)
+    await ctx.respond(embed=embed, view=view, ephemeral=False)
+
+@bot.slash_command(name="backpack", description="幽幽子帶你看看背包裏的小寶貝哦～")
+async def backpack(ctx: discord.ApplicationContext):
+    guild_id = str(ctx.guild.id)
+    user_id = str(ctx.author.id)
+
+    user_data = load_yaml("config_user.yml")
+    user_data.setdefault(guild_id, {})
+    user_data[guild_id].setdefault(user_id, {"MP": 200, "backpack": []})
+
+    backpack_items = user_data[guild_id][user_id]["backpack"]
+
+    if not backpack_items:
+        await ctx.respond("哎呀～你的背包空空的，像櫻花瓣一樣輕呢！🌸", ephemeral=True)
+        return
+
+    item_counts = {}
+    for item in backpack_items:
+        item_name = item["name"]
+        item_counts[item_name] = item_counts.get(item_name, 0) + 1
 
     options = [
         discord.SelectOption(
-            label=item["name"],
-            description=f"價格: {item['price']} + 稅: {item['tax']}, MP: {item['MP']}",
-            value=item["name"]
+            label=item_name,
+            description=f"數量: {count}",
+            value=item_name
         )
-        for item in shop_data
+        for item_name, count in item_counts.items()
     ]
 
-    select_menu = Select(
-        placeholder="選擇一件商品",
+    select = Select(
+        placeholder="選一件小東西吧～",
         options=options,
         min_values=1,
         max_values=1
@@ -1871,100 +2202,145 @@ async def shop(ctx: discord.ApplicationContext):
 
     async def select_callback(interaction: discord.Interaction):
         if interaction.user.id != ctx.author.id:
-            await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
+            await interaction.response.send_message("嘻嘻，這可不是你的小背包哦～", ephemeral=True)
             return
 
-        selected_item_name = select_menu.values[0]
-        selected_item = next(
-            (item for item in shop_data if item["name"] == selected_item_name), None
+        selected_item_name = select.values[0]
+        item_data = next((item for item in shop_data if item["name"] == selected_item_name), None)
+
+        if not item_data:
+            await interaction.response.send_message("哎呀～幽幽子找不到這個東西的秘密呢…", ephemeral=True)
+            return
+
+        mp_value = item_data["MP"]
+
+        embed = discord.Embed(
+            title=f"幽幽子的背包小角落 - {selected_item_name}",
+            description=f"這個小東西能讓你輕鬆 {mp_value} 點壓力哦～\n你想怎麼處理它呢？",
+            color=discord.Color.from_rgb(255, 105, 180)
         )
 
-        if selected_item:
-            total_price = selected_item["price"] + selected_item["tax"]
+        use_button = Button(label="享用它～", style=discord.ButtonStyle.success)
+        donate_button = Button(label="送給幽幽子", style=discord.ButtonStyle.secondary)
 
-            embed = discord.Embed(
-                title="購買確認",
-                description=(f"您選擇了 {selected_item_name}。\n"
-                             f"價格: {selected_item['price']} 幽靈幣\n"
-                             f"稅金: {selected_item['tax']} 幽靈幣\n"
-                             f"心理壓力 (MP): {selected_item['MP']}\n"
-                             f"總價格: {total_price} 幽靈幣"),
-                color=discord.Color.green()
-            )
+        async def use_callback(interaction: discord.Interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("這可不是你的選擇啦～", ephemeral=True)
+                return
 
-            confirm_button = Button(label="確認購買", style=discord.ButtonStyle.success)
-            cancel_button = Button(label="取消", style=discord.ButtonStyle.danger)
+            confirm_button = Button(label="確定要用～", style=discord.ButtonStyle.success)
+            cancel_button = Button(label="再想想", style=discord.ButtonStyle.danger)
 
-            async def confirm_callback(interaction: discord.Interaction):
+            async def confirm_use(interaction: discord.Interaction):
                 if interaction.user.id != ctx.author.id:
-                    await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
+                    await interaction.response.send_message("嘻嘻，別搶幽幽子的點心哦～", ephemeral=True)
                     return
 
-                user_balance = load_json('balance.json')
-                user_balance.setdefault(guild_id, {})
-                user_balance[guild_id].setdefault(user_id, 0)
-
-                current_balance = user_balance[guild_id][user_id]
-
-                if current_balance >= total_price:
-                    user_balance[guild_id][user_id] -= total_price
-
-                    save_json('balance.json', user_balance)
-
-                    user_data = load_yaml('config_user.yml')
-                    user_data.setdefault(guild_id, {})
-                    user_data[guild_id].setdefault(user_id, {"MP": 200})
-
-                    user_data[guild_id][user_id]["MP"] = max(
-                        0, user_data[guild_id][user_id]["MP"] - selected_item["MP"]
-                    )
-
-                    save_yaml('config_user.yml', user_data)
-
-                    effect_message = (
-                        f"您使用了 {selected_item_name}，心理壓力（MP）减少了 {selected_item['MP']} 点！\n"
-                        f"當前心理壓力（MP）：{user_data[guild_id][user_id]['MP']} 点。"
-                    )
-
-                    await interaction.response.edit_message(
-                        content=f"購買成功！已扣除 {total_price} 幽靈幣。\n{effect_message}",
-                        embed=None,
-                        view=None
-                    )
-                else:
-                    await interaction.response.edit_message(
-                        content="餘額不足，無法完成購買！", embed=None, view=None
-                    )
-
-            async def cancel_callback(interaction: discord.Interaction):
-                if interaction.user.id != ctx.author.id:
-                    await interaction.response.send_message("這不是你的選擇！", ephemeral=True)
-                    return
+                user_data[guild_id][user_id]["MP"] = max(
+                    0, user_data[guild_id][user_id]["MP"] - mp_value
+                )
+                for i, item in enumerate(user_data[guild_id][user_id]["backpack"]):
+                    if item["name"] == selected_item_name:
+                        user_data[guild_id][user_id]["backpack"].pop(i)
+                        break
+                save_yaml("config_user.yml", user_data)
 
                 await interaction.response.edit_message(
-                    content="購買已取消！", embed=None, view=None
+                    content=(f"你享用了 **{selected_item_name}**，壓力像櫻花一樣飄走了 {mp_value} 點！\n"
+                             f"現在的 MP：{user_data[guild_id][user_id]['MP']} 點，真是輕鬆呢～🌸"),
+                    embed=None,
+                    view=None
                 )
 
-            confirm_button.callback = confirm_callback
-            cancel_button.callback = cancel_callback
+            async def cancel_use(interaction: discord.Interaction):
+                await interaction.response.edit_message(
+                    content="好吧～這次就先留著它吧～", embed=None, view=None
+                )
 
-            view = View()
-            view.add_item(confirm_button)
-            view.add_item(cancel_button)
+            confirm_button.callback = confirm_use
+            cancel_button.callback = cancel_use
 
-            await interaction.response.edit_message(embed=embed, view=view)
+            confirm_view = View()
+            confirm_view.add_item(confirm_button)
+            confirm_view.add_item(cancel_button)
 
-    select_menu.callback = select_callback
+            await interaction.response.edit_message(
+                content=f"真的要用 **{selected_item_name}** 嗎？幽幽子幫你再確認一下哦～",
+                embed=None,
+                view=confirm_view
+            )
+
+        async def donate_callback(interaction: discord.Interaction):
+            if interaction.user.id != ctx.author.id:
+                await interaction.response.send_message("這可不是你的禮物哦～", ephemeral=True)
+                return
+
+            if selected_item_name in ["香烟", "台灣啤酒"]:
+                await interaction.response.edit_message(
+                    content=f"哎呀～幽幽子才不要這種 **{selected_item_name}** 呢，拿回去吧！",
+                    embed=None,
+                    view=None
+                )
+                return
+
+            confirm_button = Button(label="確定送出～", style=discord.ButtonStyle.success)
+            cancel_button = Button(label="再想想", style=discord.ButtonStyle.danger)
+
+            async def confirm_donate(interaction: discord.Interaction):
+                if interaction.user.id != ctx.author.id:
+                    await interaction.response.send_message("嘻嘻，這可不是你能送的啦～", ephemeral=True)
+                    return
+
+                for i, item in enumerate(user_data[guild_id][user_id]["backpack"]):
+                    if item["name"] == selected_item_name:
+                        user_data[guild_id][user_id]["backpack"].pop(i)
+                        break
+                save_yaml("config_user.yml", user_data)
+
+                await interaction.response.edit_message(
+                    content=f"你把 **{selected_item_name}** 送給了幽幽子，她開心地說：「謝謝你哦～❤」",
+                    embed=None,
+                    view=None
+                )
+
+            async def cancel_donate(interaction: discord.Interaction):
+                await interaction.response.edit_message(
+                    content="好吧～這次就先留著吧，幽幽子也不介意哦～", embed=None, view=None
+                )
+
+            confirm_button.callback = confirm_donate
+            cancel_button.callback = cancel_donate
+
+            confirm_view = View()
+            confirm_view.add_item(confirm_button)
+            confirm_view.add_item(cancel_button)
+
+            await interaction.response.edit_message(
+                content=f"真的要把 **{selected_item_name}** 送給幽幽子嗎？她可是很期待呢～🌸",
+                embed=None,
+                view=confirm_view
+            )
+
+        use_button.callback = use_callback
+        donate_button.callback = donate_callback
+
+        view = View()
+        view.add_item(use_button)
+        view.add_item(donate_button)
+
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    select.callback = select_callback
 
     embed = discord.Embed(
-        title="商店",
-        description="選擇想購買的商品：",
-        color=discord.Color.blue()
+        title="幽幽子的背包小天地",
+        description="來看看你收集了哪些可愛的小東西吧～🌸",
+        color=discord.Color.from_rgb(255, 105, 180)
     )
-    embed.set_footer(text="感謝您的光臨！")
+    embed.set_footer(text="幽幽子會一直陪著你的哦～")
 
     view = View()
-    view.add_item(select_menu)
+    view.add_item(select)
 
     await ctx.respond(embed=embed, view=view, ephemeral=False)
 
@@ -2138,7 +2514,6 @@ async def reset_job(ctx):
     await ctx.respond(embed=embed, view=ConfirmReset())
 
 @bot.slash_command(name="work", description="執行你的工作並賺取幽靈幣！")
-@track_balance_json
 async def work(interaction: discord.Interaction):
     try:
         if not interaction.response.is_done():
@@ -2257,7 +2632,6 @@ def convert_float_to_decimal(data):
     return data
 
 @bot.slash_command(name="pay", description="转账给其他用户")
-@track_balance_json
 async def pay(interaction: discord.Interaction, member: discord.Member, amount: str):
     try:
         await interaction.response.defer()
@@ -2315,7 +2689,6 @@ async def pay(interaction: discord.Interaction, member: discord.Member, amount: 
         await interaction.followup.send("❌ 执行命令时发生错误，请稍后再试。", ephemeral=True)
 
 @bot.slash_command(name="addmoney", description="给用户增加幽靈幣（特定用户专用）")
-@track_balance_json
 async def addmoney(interaction: discord.Interaction, member: discord.Member, amount: int):
     if interaction.user.id != AUTHOR_ID:
         await interaction.response.send_message("❌ 您没有权限执行此操作。", ephemeral=True)
@@ -2349,7 +2722,6 @@ async def addmoney(interaction: discord.Interaction, member: discord.Member, amo
     await interaction.response.send_message(embed=embed)
 
 @bot.slash_command(name="removemoney", description="移除用户幽靈幣（特定用户专用）")
-@track_balance_json
 async def removemoney(interaction: discord.Interaction, member: discord.Member, amount: int):
     if interaction.user.id != AUTHOR_ID:
         await interaction.response.send_message("❌ 您没有权限执行此操作。", ephemeral=True)
@@ -2379,33 +2751,57 @@ async def removemoney(interaction: discord.Interaction, member: discord.Member, 
 
     await interaction.response.send_message(embed=embed)
 
-@bot.slash_command(name="shutdown", description="关闭机器人")
+@bot.slash_command(name="shutdown", description="讓幽幽子安靜地沉眠")
 async def shutdown(interaction: discord.Interaction):
+    YUYUKO_QUOTES = [
+        "人世無常，魂魄永存～",
+        "櫻花散落之時，便是幽幽子用餐之刻哦～",
+        "冥界的風，總是這麼舒服呢～",
+    ]
     if interaction.user.id == AUTHOR_ID:
         try:
-            await interaction.response.send_message("关闭中...", ephemeral=True)
-            await send_global_webhook_message("🔴 **機器人即將關機**", discord.Color.red())
+            embed = discord.Embed(
+                title="幽幽子即將沉眠",
+                description="幽幽子要睡囉，晚安哦～",
+                color=discord.Color.red()
+            )
+            embed.set_footer(text=random.choice(YUYUKO_QUOTES))
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await send_global_webhook_message("🔴 **幽幽子飄然離去，魂魄歸於冥界...**", discord.Color.red())
             await asyncio.sleep(3)
             await bot.close()
         except Exception as e:
             logging.error(f"Shutdown command failed: {e}")
-            await interaction.followup.send(f"关闭失败，错误信息：{e}", ephemeral=True)
+            await interaction.followup.send(f"哎呀，幽幽子好像被什麼纏住了，無法沉眠…錯誤：{e}", ephemeral=True)
     else:
-        await interaction.response.send_message("你没有权限执行此操作。", ephemeral=True)
+        await interaction.response.send_message("嘻嘻，只有特別的人才能讓幽幽子安靜下來，你還不行哦～", ephemeral=True)
 
-@bot.slash_command(name="restart", description="重启机器人")
+@bot.slash_command(name="restart", description="喚醒幽幽子重新起舞")
 async def restart(interaction: discord.Interaction):
+    YUYUKO_QUOTES = [
+        "人世無常，魂魄永存～",
+        "櫻花散落之時，便是幽幽子用餐之刻哦～",
+        "冥界的風，總是這麼舒服呢～",
+    ]
     if interaction.user.id == AUTHOR_ID:
         try:
-            await interaction.response.send_message("重启中...", ephemeral=True)
-            await send_global_webhook_message("🔄 **機器人即將重啟...**", discord.Color.orange())
+            embed = discord.Embed(
+                title="幽幽子即將甦醒",
+                description="幽幽子要重新翩翩起舞啦，稍等片刻哦～",
+                color=discord.Color.orange()
+            )
+            embed.set_footer(text=random.choice(YUYUKO_QUOTES))
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await send_global_webhook_message("🔄 **幽幽子輕輕轉身，即將再度現身...**", discord.Color.orange())
             await asyncio.sleep(3)
             os.execv(sys.executable, [sys.executable] + sys.argv)
         except Exception as e:
             logging.error(f"Restart command failed: {e}")
-            await interaction.followup.send(f"重启失败，错误信息：{e}", ephemeral=True)
+            await interaction.followup.send(f"哎呀，幽幽子好像絆倒了…重啟失敗，錯誤：{e}", ephemeral=True)
     else:
-        await interaction.response.send_message("你没有权限执行此操作。", ephemeral=True)
+        await interaction.response.send_message("只有靈魂的主人才能喚醒幽幽子，你還不行呢～", ephemeral=True)
         
 @bot.slash_command(name="ban", description="封禁用户")
 async def ban(interaction: discord.Interaction, member: discord.Member, reason: str = None):
@@ -3578,7 +3974,7 @@ async def draw_lots_command(interaction: discord.Interaction):
         title="📢 御神籤功能停用公告 📢",
         description=(
             f"很抱歉，**{user_name}**，\n"
-            "在今日，我們 Discord Bot 幽幽子的作者，也就是 Miya253，準備停用在幽幽子上的御神籤功能。\n\n"
+            "在今日，我們 Discord Bot 幽幽子的作者，也就是 Miya253，停用在幽幽子上的御神籤功能。\n\n"
             "如果您有抽籤需求，請使用以下鏈接邀請 **博麗靈夢**：\n"
             "[點擊此訊息邀請 博麗靈夢](https://discord.com/oauth2/authorize?client_id=1352316233772437630&permissions=8&integration_type=0&scope=bot)\n\n"
             "以上，很抱歉未能為用戶們提供最好的抽籤體驗。"
@@ -3644,7 +4040,7 @@ async def quiz(ctx: ApplicationContext):
                 return await interaction.response.send_message("⏳ 這題已經解開啦，幽靈不會重複問哦！", ephemeral=True)
 
             self.view.answered = True
-            self.view.stop()
+            self.view.stop()  # 停止超時計時器
 
             for child in self.view.children:
                 child.disabled = True
@@ -3695,7 +4091,8 @@ async def help(ctx: discord.ApplicationContext):
             "> `shutdown` - 讓白玉樓的燈火暫時 關閉機器人，讓幽幽子休息一下吧～\n"
             "> `restart` - 重啟機器人，靈魂需要一點新鮮空氣呢～\n"
             "> `addmoney` - 為用戶添加幽靈幣，靈魂的財富增加啦！\n"
-            "> `remove` - 移除用戶的幽靈幣，哎呀，靈魂的財富減少了呢～"
+            "> `removemoney` - 移除用戶的幽靈幣，哎呀，靈魂的財富減少了呢～\n"
+            "> `tax` = 讓幽幽子的主人幫助國庫增長一些國稅"
         ),
         color=discord.Color.from_rgb(255, 182, 193)
     )
@@ -3708,7 +4105,9 @@ async def help(ctx: discord.ApplicationContext):
             "> `work` - 努力工作，賺取更多的幽靈幣吧！\n"
             "> `pay` - 轉賬給其他靈魂，分享你的財富吧～\n"
             "> `reset_job` - 重置你的職業，換個新身份吧～\n"
-            "> `balance_top` - 查看經濟排行榜，看看誰是白玉樓最富有的靈魂！"
+            "> `leaderboard` - 查看經濟排行榜，看看誰是白玉樓最富有的靈魂！\n"
+            "> `shop` - 在工作之餘也別忘了補充體力呀~\n"
+            "> `backpack` - 可以看看靈魂的背包裏面有什麽好吃的~"
         ),
         color=discord.Color.from_rgb(255, 182, 193)
     )
