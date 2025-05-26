@@ -17,6 +17,7 @@ import requests
 import sqlite3
 import openai # -v 0.28
 import math
+import pytz
 from discord.ext import commands
 from discord.ui import View, Button, Select
 from discord import ui
@@ -27,8 +28,8 @@ from urllib.parse import urlencode
 from filelock import FileLock
 from responses import food_responses, death_responses, life_death_responses, self_responses, friend_responses, maid_responses, mistress_responses, reimu_responses, get_random_response
 from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
-from functools import wraps
 
+session = None
 file_lock = asyncio.Lock()
 load_dotenv()
 
@@ -119,51 +120,6 @@ if not shop_data:
 
 cooldowns = {}
 active_giveaways = {}
-
-BALANCE_FILE = "balance.json"
-
-def track_balance_json(command_func):
-    """裝飾器：監測所有涉及 balance.json 的讀取與寫入"""
-    @wraps(command_func)
-    async def wrapper(interaction: discord.Interaction, *args, **kwargs):
-        try:
-            logging.info(f"執行指令: {command_func.__name__} 來自 {interaction.user} ({interaction.user.id})")
-            
-            before_data = await read_balance_file()
-            logging.info(f"讀取 balance.json (指令前): {before_data}")
-
-            result = await command_func(interaction, *args, **kwargs)
-
-            after_data = await read_balance_file()
-            logging.info(f"讀取 balance.json (指令後): {after_data}")
-
-            if before_data and not after_data:
-                logging.error(f"❌ balance.json 可能被 {command_func.__name__} 清空！")
-
-            return result
-        except Exception as e:
-            logging.error(f"執行 {command_func.__name__} 時發生錯誤: {e}", exc_info=True)
-            raise e
-    return wrapper
-
-async def read_balance_file():
-    """異步讀取 balance.json"""
-    try:
-        async with aiofiles.open(BALANCE_FILE, 'r', encoding='utf-8') as file:
-            content = await file.read()
-            return json.loads(content) if content else {}
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        logging.error(f"讀取 balance.json 失敗: {e}")
-        return {}
-
-async def write_balance_file(data):
-    """異步寫入 balance.json"""
-    try:
-        async with aiofiles.open(BALANCE_FILE, 'w', encoding='utf-8') as file:
-            await file.write(json.dumps(data, indent=4, ensure_ascii=False))
-        logging.info("✅ balance.json 更新成功")
-    except Exception as e:
-        logging.error(f"寫入 balance.json 失敗: {e}")
 
 disconnect_count = 0
 last_disconnect_time = None
@@ -421,29 +377,85 @@ def get_user_background_info(user_id):
     conn.close()
     return "\n".join([row[0] for row in rows]) if rows else None
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+async def send_webhook_message(bot: discord.Client, content: str, color: discord.Color = discord.Color.from_rgb(219, 112, 147)) -> bool:
+    """
+    通過 Discord Webhook 發送嵌入訊息，使用機器人頭像作為頁腳圖標。
 
-async def send_global_webhook_message(content, color=discord.Color.from_rgb(219, 112, 147)):
-    """🌸 讓幽幽子的靈魂之音輕飄至現世～"""
-    if not WEBHOOK_URL:
-        print("❌ 幽幽子找不到通往現世的路，通知無法傳達～")
-        return
+    Args:
+        bot (discord.Client): Discord 機器人對象，用於獲取頭像。
+        content (str): 要發送的訊息內容。
+        color (discord.Color, optional): 嵌入訊息的顏色。默認為粉色 (RGB: 219, 112, 147)。
 
+    Returns:
+        bool: 訊息發送成功返回 True，失敗返回 False。
+
+    Raises:
+        ValueError: 如果未配置 Webhook URL。
+        aiohttp.ClientError: 如果 Webhook 請求失敗。
+        discord.errors.HTTPException: 如果 Discord API 返回錯誤。
+    """
+    global session
+    webhook_url = os.getenv("WEBHOOK_URL")
+    if not webhook_url:
+        logging.error("未配置 Webhook URL，無法發送訊息。")
+        raise ValueError("Webhook URL 未配置。")
+
+    icon_url = bot.user.avatar.url if bot.user.avatar else bot.user.default_avatar.url
     embed = discord.Embed(
         title="🌸 幽幽子的飄渺呢喃",
         description=content,
         color=color,
         timestamp=datetime.now(timezone.utc)
     )
-    embed.set_footer(text="來自冥界的微風與魂魄之語～", icon_url="https://i.imgur.com/oBPXxpv.png")
+    embed.set_footer(text="來自冥界的微風與魂魄之語～", icon_url=icon_url)
+
+    try:
+        webhook = discord.Webhook.from_url(webhook_url, session=session)
+        await webhook.send(embed=embed)
+        logging.info("Webhook 訊息發送成功。")
+        return True
+    except (aiohttp.ClientError, discord.errors.HTTPException) as e:
+        logging.error(f"發送 Webhook 訊息失敗：{e}")
+        return False
+
+CHANNEL_ID = 1372564885308702811
+WEBHOOK = os.getenv("WEBHOOK")
+
+@bot.event
+async def on_member_join(member):
+    if member.guild.id != 1372546957305970740:
+        return
+
+    embed = discord.Embed(
+        title="🎉 歡迎新成員！",
+        description=f"歡迎 {member.mention} 加入 **{member.guild.name}**！",
+        color=discord.Color.green(),
+    )
+    embed.add_field(
+        name="📜 伺服器規則",
+        value="請閱讀<#1372553334472572938>以了解我們的規則！",
+        inline=False
+    )
+    embed.add_field(
+        name="🎭 角色領取",
+        value="在<#1372572009531310217>領取你的角色！",
+        inline=False
+    )
+    embed.set_thumbnail(url=member.avatar.url if member.avatar else discord.Embed.Empty)
+    embed.set_footer(text="歡迎機器人", icon_url=bot.user.avatar.url if bot.user.avatar else discord.Embed.Empty)
 
     try:
         async with aiohttp.ClientSession() as session:
-            webhook = discord.Webhook.from_url(WEBHOOK_URL, session=session)
-            await webhook.send(embed=embed)
-            print("✅ 幽幽子的呢喃已飄至現世～")
+            webhook = discord.Webhook.from_url(WEBHOOK, session=session)
+            await webhook.send(
+                embed=embed,
+                username="歡迎機器人",
+                allowed_mentions=discord.AllowedMentions(users=True)
+            )
+    except discord.errors.HTTPException as e:
+        print(f"Webhook發送失敗：{e}")
     except Exception as e:
-        print(f"❌ 幽幽子的聲音受阻：{e}")
+        print(f"發生未知錯誤：{e}")
 
 @bot.event
 async def on_message(message):
@@ -635,6 +647,13 @@ async def on_message(message):
         await message.channel.send(f'deadpool:sh*t, I really should have gone with NSYNC!')
         
     if '普奇神父' in message.content:
+        try:
+            await message.delete()
+        except discord.Forbidden:
+            await message.channel.send("⚠️ 無法刪除訊息，請確認我有刪除訊息的權限。")
+            return
+        except discord.NotFound:
+            pass
         await message.channel.send("引力を信じるか？")
         await asyncio.sleep(3)
         await message.channel.send("私は最初にキノコを食べた者を尊敬する。毒キノコかもしれないのに。")
@@ -676,60 +695,76 @@ async def on_message(message):
                 await message.channel.send("這個伺服器內沒有普通成員。")
         else:
             await message.channel.send("這個能力只能在伺服器內使用。")
+    
+    if message.content.startswith('關閉機器人'):
+        if message.author.id == AUTHOR_ID:
+            await message.channel.send("正在關閉...")
+            await asyncio.sleep(5)
+            await send_webhook_message("🔴 **幽幽子飄然離去，魂魄歸於冥界...**", discord.Color.red())
+            await asyncio.sleep(5)
+            await bot.close()
+        else:
+            await message.channel.send("你無權關閉我 >_<")
 
     await bot.process_commands(message)
 
 @bot.event
 async def on_ready():
-    print(f"Logged in as {bot.user} (ID: {bot.user.id})")
-    
-    print("------")
-    
-    print("斜線指令已自動同步。")
-    
-    await send_global_webhook_message("✅ **機器人已上線！**", discord.Color.green())
-    
+    """
+    當機器人成功上線時執行，設置狀態、發送 Webhook 訊息並記錄伺服器資訊。
+    """
+    global session
     try:
+        if session is None or session.closed:
+            session = aiohttp.ClientSession()
+            logging.info("已在 on_ready 初始化全局 aiohttp.ClientSession。")
+
+        logging.info(f"已登入為 {bot.user} (ID: {bot.user.id})")
+        logging.info("------")
+        logging.info("斜線指令已自動同步。")
+
+        await send_webhook_message(bot, "✅ **機器人已上線！**", discord.Color.green())
+
         await bot.change_presence(
             status=discord.Status.dnd,
-            activity=discord.Activity(type=discord.ActivityType.playing, name='Honkai:Star rail')
+            activity=discord.Activity(type=discord.ActivityType.playing, name='Honkai: Star Rail')
         )
-        print("已設置機器人的狀態。")
-    
+        logging.info("已設置機器人的狀態。")
+
+        end_time = time.time()
+        startup_time = end_time - start_time
+        logging.info(f"Bot startup time: {startup_time:.2f} seconds")
+
+        logging.info("加入的伺服器列表：")
+        for guild in bot.guilds:
+            logging.info(f"- {guild.name} (ID: {guild.id})")
+
+        global last_activity_time
+        last_activity_time = time.time()
+
+        bot.loop.create_task(check_long_disconnect())
+
+        init_db()
+
+    except discord.errors.HTTPException as e:
+        logging.error(f"設置機器人狀態或發送 Webhook 訊息失敗：{e}")
+    except NameError as e:
+        logging.error(f"未定義的變數或函數：{e}")
     except Exception as e:
-        print(f"Failed to set presence: {e}")
-    
-    end_time = time.time()
-    startup_time = end_time - start_time
-    print(f'Bot startup time: {startup_time:.2f} seconds')
-    
-    print('加入的伺服器列表：')
-    for guild in bot.guilds:
-        print(f'- {guild.name} (ID: {guild.id})')
-    
-    global last_activity_time
-    last_activity_time = time.time()
-    
-    bot.loop.create_task(check_long_disconnect())
-    
-    init_db()
+        logging.error(f"on_ready 事件處理失敗：{e}")
 
 @bot.slash_command(name="join", description="讓幽幽子飄進你的語音頻道哦～")
 async def join(ctx: ApplicationContext):
     """讓幽幽子輕輕飄進使用者的語音頻道，只有特定的人能喚我哦～"""
-    # Defer the response to avoid interaction timeout
-    await ctx.defer(ephemeral=True)  # Use ephemeral=True if you want the "Bot is thinking..." message to be private
-
-    # 檢查權限
+    await ctx.defer(ephemeral=True) 
     if ctx.author.id != AUTHOR_ID:
         embed = Embed(
             description="哎呀～你不是能喚我的人呢，這份櫻花餅不給你吃哦～",
-            color=0xFFB6C1  # 粉色 LightPink
+            color=0xFFB6C1
         )
         await ctx.followup.send(embed=embed, ephemeral=True)
         return
 
-    # 檢查使用者是否在語音頻道
     if not ctx.author.voice:
         embed = Embed(
             description="嗯？你沒在語音頻道裡呀～幽幽子可不會自己找地方飄哦～",
@@ -738,7 +773,6 @@ async def join(ctx: ApplicationContext):
         await ctx.followup.send(embed=embed, ephemeral=True)
         return
 
-    # 獲取語音頻道並檢查權限
     channel = ctx.author.voice.channel
     if not channel.permissions_for(ctx.guild.me).connect:
         embed = Embed(
@@ -748,7 +782,6 @@ async def join(ctx: ApplicationContext):
         await ctx.followup.send(embed=embed, ephemeral=True)
         return
 
-    # 加入或移動到頻道
     voice_client = ctx.voice_client
     try:
         if voice_client:
@@ -765,18 +798,16 @@ async def join(ctx: ApplicationContext):
         await ctx.followup.send(embed=embed, ephemeral=True)
         return
 
-    # 成功回應，用 bot 頭像
     embed = Embed(
         description=f"幽幽子我{action} {channel.name} 啦～有沒有好吃的等著我呀？",
         color=0xFFB6C1
     )
-    embed.set_thumbnail(url=ctx.bot.user.avatar.url)  # 直接用 bot 頭像
+    embed.set_thumbnail(url=ctx.bot.user.avatar.url)
     await ctx.followup.send(embed=embed)
 
 @bot.slash_command(name="leave", description="讓幽幽子飄離語音頻道啦～")
 async def leave(ctx: ApplicationContext):
     """讓幽幽子從語音頻道飄走，只有特定的人能趕我走哦～"""
-    # 檢查權限
     if ctx.author.id != AUTHOR_ID:
         embed = Embed(
             description="嘻嘻～你不是能趕走我的人哦，幽幽子還想多吃點呢～",
@@ -785,7 +816,6 @@ async def leave(ctx: ApplicationContext):
         await ctx.respond(embed=embed, ephemeral=True)
         return
 
-    # 檢查機器人是否在語音頻道
     voice_client = ctx.voice_client
     if not voice_client:
         embed = Embed(
@@ -795,14 +825,13 @@ async def leave(ctx: ApplicationContext):
         await ctx.respond(embed=embed, ephemeral=True)
         return
 
-    # 離開頻道
     try:
         await voice_client.disconnect()
         embed = Embed(
             description="好吧～幽幽子飄走啦，掰掰～下次記得多準備點點心哦～",
             color=0xFFB6C1
         )
-        embed.set_thumbnail(url=ctx.bot.user.avatar.url)  # 直接用 bot 頭像
+        embed.set_thumbnail(url=ctx.bot.user.avatar.url)
     except discord.ClientException as e:
         embed = Embed(
             description=f"哎呀～飄不出去呢，因為 {e}，櫻花餅都沒吃完～",
@@ -870,10 +899,14 @@ async def server_bank(ctx: discord.ApplicationContext):
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
-    
+
     def save_json(file, data):
-        with open(file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
+        try:
+            with open(file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=4, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving {file}: {e}")
+            raise
 
     def format_number(num):
         if num >= 1e20:
@@ -886,6 +919,18 @@ async def server_bank(ctx: discord.ApplicationContext):
             return f"{num / 1e8:.2f} 億"
         else:
             return f"{num:.2f}"
+
+    def log_transaction(guild_id, user_id, amount, transaction_type):
+        transactions = load_json("transactions.json")
+        if guild_id not in transactions:
+            transactions[guild_id] = []
+        transactions[guild_id].append({
+            "user_id": user_id,
+            "amount": amount,
+            "type": transaction_type,
+            "timestamp": datetime.now().isoformat()
+        })
+        save_json("transactions.json", transactions)
 
     def check_loan_status(server_config, guild_id, user_id):
         if guild_id not in server_config or "loans" not in server_config[guild_id]:
@@ -914,13 +959,13 @@ async def server_bank(ctx: discord.ApplicationContext):
 
     if guild_id not in balance:
         balance[guild_id] = {}
-    if user_id not in balance[guild_id]:
-        balance[guild_id][user_id] = 0
+    if user_id not in balance[guild_id] or not isinstance(balance[guild_id][user_id], (int, float)):
+        balance[guild_id][user_id] = 0.0
 
     if guild_id not in personal_bank:
         personal_bank[guild_id] = {}
-    if user_id not in personal_bank[guild_id]:
-        personal_bank[guild_id][user_id] = 0
+    if user_id not in personal_bank[guild_id] or not isinstance(personal_bank[guild_id][user_id], (int, float)):
+        personal_bank[guild_id][user_id] = 0.0
 
     if guild_id not in server_config:
         server_config[guild_id] = {}
@@ -961,14 +1006,28 @@ async def server_bank(ctx: discord.ApplicationContext):
 
     class BankButtons(discord.ui.View):
         def __init__(self, has_loan):
-            super().__init__(timeout=None)
+            super().__init__(timeout=60)
             self.has_loan = has_loan
+            self.interaction_completed = False
 
         async def interaction_check(self, interaction: discord.Interaction) -> bool:
             if interaction.user.id != ctx.author.id:
                 await interaction.response.send_message("這不是你的金庫操作哦～", ephemeral=True)
                 return False
+            if self.interaction_completed:
+                await interaction.response.send_message("操作已完成，請重新執行 `/server_bank`！", ephemeral=True)
+                return False
             return True
+
+        async def on_timeout(self):
+            for item in self.children:
+                item.disabled = True
+            embed = discord.Embed(
+                title="🌸 金庫操作已結束 🌸",
+                description="操作已超時，請重新執行 `/server_bank` 命令！",
+                color=discord.Color.red()
+            )
+            await self.message.edit(embed=embed, view=self)
 
         @discord.ui.button(label="取錢", style=discord.ButtonStyle.success)
         async def withdraw(self, button: discord.ui.Button, interaction: discord.Interaction):
@@ -985,10 +1044,11 @@ async def server_bank(ctx: discord.ApplicationContext):
         else:
             @discord.ui.button(label="還款", style=discord.ButtonStyle.green)
             async def repay(self, button: discord.ui.Button, interaction: discord.Interaction):
+                await interaction.response.defer(ephemeral=True)
                 server_config = load_json("server_config.json")
                 loan = check_loan_status(server_config, guild_id, user_id)
                 if not loan or loan["repaid"]:
-                    await interaction.response.send_message(embed=discord.Embed(
+                    await interaction.followup.send(embed=discord.Embed(
                         title="🌸 無需還款！🌸",
                         description="你目前沒有未還款的借貸哦～",
                         color=discord.Color.red()
@@ -1000,7 +1060,7 @@ async def server_bank(ctx: discord.ApplicationContext):
                 amount_with_interest = round(loan["amount"] * (1 + loan["interest_rate"]), 2)
 
                 if user_balance < amount_with_interest:
-                    await interaction.response.send_message(embed=discord.Embed(
+                    await interaction.followup.send(embed=discord.Embed(
                         title="🌸 餘額不足！🌸",
                         description=f"你需要 {format_number(amount_with_interest)} 幽靈幣來還款，但你的餘額只有 {format_number(user_balance)} 幽靈幣哦～",
                         color=discord.Color.red()
@@ -1009,9 +1069,11 @@ async def server_bank(ctx: discord.ApplicationContext):
 
                 balance[guild_id][user_id] -= amount_with_interest
                 server_config[guild_id]["server_bank"]["total"] += amount_with_interest
-                server_config[guild_id]["loans"][user_id]["repaid"] = True
+                if "loans" in server_config[guild_id] and user_id in server_config[guild_id]["loans"]:
+                    server_config[guild_id]["loans"][user_id]["repaid"] = True
                 save_json("balance.json", balance)
                 save_json("server_config.json", server_config)
+                log_transaction(guild_id, user_id, amount_with_interest, "repay")
 
                 embed = discord.Embed(
                     title="🌸 還款成功！🌸",
@@ -1022,7 +1084,11 @@ async def server_bank(ctx: discord.ApplicationContext):
                     ),
                     color=discord.Color.gold()
                 )
-                await self.message.edit(embed=embed, view=BankButtons(has_loan=False))
+                self.interaction_completed = True
+                for item in self.children:
+                    item.disabled = True
+                await self.message.edit(embed=embed, view=self)
+                await interaction.followup.send(embed=embed, ephemeral=True)
 
     class WithdrawModal(discord.ui.Modal):
         def __init__(self, message, has_loan):
@@ -1036,33 +1102,47 @@ async def server_bank(ctx: discord.ApplicationContext):
             ))
 
         async def callback(self, interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
             try:
                 amount = float(self.children[0].value)
                 amount = round(amount, 2)
-                if amount <= 0:
-                    await interaction.response.send_message(embed=discord.Embed(
+                if amount <= 0 or amount > 1e20:
+                    await interaction.followup.send(embed=discord.Embed(
                         title="🌸 無效金額！🌸",
-                        description="取款金額必須大於 0 哦～",
+                        description="金額必須大於 0 且不超過 1e20 幽靈幣哦～",
                         color=discord.Color.red()
                     ), ephemeral=True)
                     return
 
                 balance = load_json("balance.json")
                 personal_bank = load_json("personal_bank.json")
-                personal_bank_balance = personal_bank[guild_id][user_id]
+                personal_bank_balance = personal_bank.get(guild_id, {}).get(user_id, 0.0)
 
                 if amount > personal_bank_balance:
-                    await interaction.response.send_message(embed=discord.Embed(
+                    await interaction.followup.send(embed=discord.Embed(
                         title="🌸 個人金庫餘額不足！🌸",
                         description=f"你的個人金庫只有 {format_number(personal_bank_balance)} 幽靈幣，無法取出 {format_number(amount)} 哦～",
                         color=discord.Color.red()
                     ), ephemeral=True)
                     return
 
+                if guild_id not in balance:
+                    balance[guild_id] = {}
+                if user_id not in balance[guild_id] or not isinstance(balance[guild_id][user_id], (int, float)):
+                    balance[guild_id][user_id] = 0.0
+
+                if guild_id not in personal_bank:
+                    personal_bank[guild_id] = {}
+                if user_id not in personal_bank[guild_id] or not isinstance(personal_bank[guild_id][user_id], (int, float)):
+                    personal_bank[guild_id][user_id] = 0.0
+
                 personal_bank[guild_id][user_id] -= amount
                 balance[guild_id][user_id] += amount
+                print(f"Saving balance.json: balance[{guild_id}][{user_id}] = {balance[guild_id][user_id]}")
+                print(f"Saving personal_bank.json: personal_bank[{guild_id}][{user_id}] = {personal_bank[guild_id][user_id]}")
                 save_json("balance.json", balance)
                 save_json("personal_bank.json", personal_bank)
+                log_transaction(guild_id, user_id, amount, "withdraw")
 
                 embed = discord.Embed(
                     title="🌸 取款成功！🌸",
@@ -1073,12 +1153,24 @@ async def server_bank(ctx: discord.ApplicationContext):
                     ),
                     color=discord.Color.gold()
                 )
-                await self.message.edit(embed=embed, view=BankButtons(self.has_loan))
+                view = BankButtons(self.has_loan)
+                view.interaction_completed = True
+                for item in view.children:
+                    item.disabled = True
+                await self.message.edit(embed=embed, view=view)
+                await interaction.followup.send(embed=embed, ephemeral=True)
 
             except ValueError:
-                await interaction.response.send_message(embed=discord.Embed(
+                await interaction.followup.send(embed=discord.Embed(
                     title="🌸 無效金額！🌸",
                     description="請輸入有效的數字金額哦～",
+                    color=discord.Color.red()
+                ), ephemeral=True)
+            except Exception as e:
+                print(f"WithdrawModal callback error: {e}")
+                await interaction.followup.send(embed=discord.Embed(
+                    title="🌸 系統錯誤！🌸",
+                    description="取錢時發生錯誤，請稍後再試～",
                     color=discord.Color.red()
                 ), ephemeral=True)
 
@@ -1094,23 +1186,24 @@ async def server_bank(ctx: discord.ApplicationContext):
             ))
 
         async def callback(self, interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
             try:
                 amount = float(self.children[0].value)
                 amount = round(amount, 2)
-                if amount <= 0:
-                    await interaction.response.send_message(embed=discord.Embed(
+                if amount <= 0 or amount > 1e20:
+                    await interaction.followup.send(embed=discord.Embed(
                         title="🌸 無效金額！🌸",
-                        description="存款金額必須大於 0 哦～",
+                        description="金額必須大於 0 且不超過 1e20 幽靈幣哦～",
                         color=discord.Color.red()
                     ), ephemeral=True)
                     return
 
                 balance = load_json("balance.json")
                 personal_bank = load_json("personal_bank.json")
-                user_balance = balance[guild_id][user_id]
+                user_balance = balance.get(guild_id, {}).get(user_id, 0.0)
 
                 if amount > user_balance:
-                    await interaction.response.send_message(embed=discord.Embed(
+                    await interaction.followup.send(embed=discord.Embed(
                         title="🌸 餘額不足！🌸",
                         description=f"你的餘額只有 {format_number(user_balance)} 幽靈幣，無法存入 {format_number(amount)} 哦～",
                         color=discord.Color.red()
@@ -1120,22 +1213,20 @@ async def server_bank(ctx: discord.ApplicationContext):
                 if guild_id not in balance:
                     balance[guild_id] = {}
                 if user_id not in balance[guild_id] or not isinstance(balance[guild_id][user_id], (int, float)):
-                    balance[guild_id][user_id] = 0
+                    balance[guild_id][user_id] = 0.0
 
                 if guild_id not in personal_bank:
                     personal_bank[guild_id] = {}
                 if user_id not in personal_bank[guild_id] or not isinstance(personal_bank[guild_id][user_id], (int, float)):
-                    personal_bank[guild_id][user_id] = 0
+                    personal_bank[guild_id][user_id] = 0.0
 
-                print(f"扣款前: balance[{guild_id}][{user_id}] = {balance[guild_id][user_id]}")
                 balance[guild_id][user_id] -= amount
-                print(f"扣款後: balance[{guild_id}][{user_id}] = {balance[guild_id][user_id]}")
-                print(f"存款前: personal_bank[{guild_id}][{user_id}] = {personal_bank[guild_id][user_id]}")
                 personal_bank[guild_id][user_id] += amount
-                print(f"存款後: personal_bank[{guild_id}][{user_id}] = {personal_bank[guild_id][user_id]}")
-                
+                print(f"Saving balance.json: balance[{guild_id}][{user_id}] = {balance[guild_id][user_id]}")
+                print(f"Saving personal_bank.json: personal_bank[{guild_id}][{user_id}] = {personal_bank[guild_id][user_id]}")
                 save_json("balance.json", balance)
                 save_json("personal_bank.json", personal_bank)
+                log_transaction(guild_id, user_id, amount, "deposit")
 
                 embed = discord.Embed(
                     title="🌸 存款成功！🌸",
@@ -1146,17 +1237,22 @@ async def server_bank(ctx: discord.ApplicationContext):
                     ),
                     color=discord.Color.gold()
                 )
-                await self.message.edit(embed=embed, view=BankButtons(self.has_loan))
+                view = BankButtons(self.has_loan)
+                view.interaction_completed = True
+                for item in view.children:
+                    item.disabled = True
+                await self.message.edit(embed=embed, view=view)
+                await interaction.followup.send(embed=embed, epubhemeral=True)
 
             except ValueError:
-                await interaction.response.send_message(embed=discord.Embed(
+                await interaction.followup.send(embed=discord.Embed(
                     title="🌸 無效金額！🌸",
                     description="請輸入有效的數字金額哦～",
                     color=discord.Color.red()
                 ), ephemeral=True)
             except Exception as e:
-                print(f"DepositModal.callback 發生錯誤: {e}")
-                await interaction.response.send_message(embed=discord.Embed(
+                print(f"DepositModal callback error: {e}")
+                await interaction.followup.send(embed=discord.Embed(
                     title="🌸 系統錯誤！🌸",
                     description="存錢時發生錯誤，請稍後再試～",
                     color=discord.Color.red()
@@ -1174,13 +1270,14 @@ async def server_bank(ctx: discord.ApplicationContext):
             ))
 
         async def callback(self, interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
             try:
                 amount = float(self.children[0].value)
                 amount = round(amount, 2)
-                if amount <= 0:
-                    await interaction.response.send_message(embed=discord.Embed(
+                if amount <= 0 or amount > 1e20:
+                    await interaction.followup.send(embed=discord.Embed(
                         title="🌸 無效金額！🌸",
-                        description="借貸金額必須大於 0 哦～",
+                        description="金額必須大於 0 且不超過 1e20 幽靈幣哦～",
                         color=discord.Color.red()
                     ), ephemeral=True)
                     return
@@ -1190,7 +1287,7 @@ async def server_bank(ctx: discord.ApplicationContext):
                 server_bank_balance = server_config[guild_id]["server_bank"]["total"]
 
                 if amount > server_bank_balance:
-                    await interaction.response.send_message(embed=discord.Embed(
+                    await interaction.followup.send(embed=discord.Embed(
                         title="🌸 國庫餘額不足！🌸",
                         description=f"國庫只有 {format_number(server_bank_balance)} 幽靈幣，無法借出 {format_number(amount)} 哦～",
                         color=discord.Color.red()
@@ -1211,8 +1308,11 @@ async def server_bank(ctx: discord.ApplicationContext):
 
                 server_config[guild_id]["server_bank"]["total"] -= amount
                 balance[guild_id][user_id] += amount
+                print(f"Saving balance.json: balance[{guild_id}][{user_id}] = {balance[guild_id][user_id]}")
+                print(f"Saving server_config.json: server_bank_total = {server_config[guild_id]['server_bank']['total']}")
                 save_json("balance.json", balance)
                 save_json("server_config.json", server_config)
+                log_transaction(guild_id, user_id, amount, "borrow")
 
                 embed = discord.Embed(
                     title="🌸 借貸成功！🌸",
@@ -1227,12 +1327,24 @@ async def server_bank(ctx: discord.ApplicationContext):
                     ),
                     color=discord.Color.gold()
                 )
-                await self.message.edit(embed=embed, view=BankButtons(has_loan=True))
+                view = BankButtons(has_loan=True)
+                view.interaction_completed = True
+                for item in view.children:
+                    item.disabled = True
+                await self.message.edit(embed=embed, view=view)
+                await interaction.followup.send(embed=embed, ephemeral=True)
 
             except ValueError:
-                await interaction.response.send_message(embed=discord.Embed(
+                await interaction.followup.send(embed=discord.Embed(
                     title="🌸 無效金額！🌸",
                     description="請輸入有效的數字金額哦～",
+                    color=discord.Color.red()
+                ), ephemeral=True)
+            except Exception as e:
+                print(f"BorrowModal callback error: {e}")
+                await interaction.followup.send(embed=discord.Embed(
+                    title="🌸 系統錯誤！🌸",
+                    description="借貸時發生錯誤，請稍後再試～",
                     color=discord.Color.red()
                 ), ephemeral=True)
 
@@ -1941,7 +2053,7 @@ async def leaderboard(ctx: discord.ApplicationContext):
 
     embed.set_footer(text="排行榜僅顯示前 10 名")
     await ctx.followup.send(embed=embed)
-        
+
 @bot.slash_command(name="shop", description="🌸 來逛逛幽幽子的夢幻商店吧～")
 async def shop(ctx: discord.ApplicationContext):
     guild_id = str(ctx.guild.id)
@@ -2064,6 +2176,8 @@ async def shop(ctx: discord.ApplicationContext):
 
                             save_yaml('config_user.yml', user_data)
 
+                            self.stop()
+
                             await interaction.response.edit_message(
                                 content=f"✨ **{selected_item_name}** 已存入背包！",
                                 embed=None, view=None
@@ -2084,6 +2198,8 @@ async def shop(ctx: discord.ApplicationContext):
 
                             save_yaml('config_user.yml', user_data)
 
+                            self.stop()
+
                             await interaction.response.edit_message(
                                 content=f"🍽️ 你食用了 **{selected_item_name}**，心理壓力（MP）下降了 {selected_item['MP']} 點！",
                                 embed=None, view=None
@@ -2096,6 +2212,8 @@ async def shop(ctx: discord.ApplicationContext):
 
                         await interaction.response.edit_message(embed=embed, view=choice_view)
                     else:
+                        self.stop()
+
                         await interaction.response.edit_message(
                             content="幽靈幣不足呢～要不要再努力賺一點？💸", embed=None, view=None
                         )
@@ -2104,6 +2222,9 @@ async def shop(ctx: discord.ApplicationContext):
                     if interaction.user.id != ctx.author.id:
                         await interaction.response.send_message("這不是你的選擇喔～", ephemeral=True)
                         return
+
+                    self.stop()
+
                     await interaction.response.edit_message(
                         content="已取消購買呢～♪", embed=None, view=None
                     )
@@ -2750,58 +2871,98 @@ async def removemoney(interaction: discord.Interaction, member: discord.Member, 
     embed.set_footer(text="感谢使用幽靈幣系统")
 
     await interaction.response.send_message(embed=embed)
-
+    
 @bot.slash_command(name="shutdown", description="讓幽幽子安靜地沉眠")
 async def shutdown(interaction: discord.Interaction):
-    YUYUKO_QUOTES = [
-        "人世無常，魂魄永存～",
-        "櫻花散落之時，便是幽幽子用餐之刻哦～",
-        "冥界的風，總是這麼舒服呢～",
-    ]
-    if interaction.user.id == AUTHOR_ID:
-        try:
-            embed = discord.Embed(
-                title="幽幽子即將沉眠",
-                description="幽幽子要睡囉，晚安哦～",
-                color=discord.Color.red()
-            )
-            embed.set_footer(text=random.choice(YUYUKO_QUOTES))
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            await send_global_webhook_message("🔴 **幽幽子飄然離去，魂魄歸於冥界...**", discord.Color.red())
-            await asyncio.sleep(3)
-            await bot.close()
-        except Exception as e:
-            logging.error(f"Shutdown command failed: {e}")
-            await interaction.followup.send(f"哎呀，幽幽子好像被什麼纏住了，無法沉眠…錯誤：{e}", ephemeral=True)
-    else:
-        await interaction.response.send_message("嘻嘻，只有特別的人才能讓幽幽子安靜下來，你還不行哦～", ephemeral=True)
+    if interaction.user.id != AUTHOR_ID:
+        await interaction.response.send_message(
+            "嘻嘻，只有特別的人才能讓幽幽子安靜下來，你還不行哦～",
+            ephemeral=True
+        )
+        return
+
+    try:
+        icon_url = bot.user.avatar.url if bot.user.avatar else bot.user.default_avatar.url
+        embed = discord.Embed(
+            title="幽幽子即將沉眠",
+            description="幽幽子要睡囉，晚安哦～",
+            color=discord.Color.red(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_footer(text="來自冥界的微風與魂魄之語～", icon_url=icon_url)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_webhook_message(bot, "🔴 **幽幽子飄然離去，魂魄歸於冥界...**", discord.Color.red())
+        await asyncio.sleep(3)
+        logging.info("Bot shutdown initiated by authorized user.")
+
+        global session
+        if session and not session.closed:
+            await session.close()
+            logging.info("已關閉 aiohttp.ClientSession。")
+
+        tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+        if tasks:
+            logging.info(f"正在取消 {len(tasks)} 個未完成任務。")
+            for task in tasks:
+                task.cancel()
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for i, result in enumerate(results):
+                if isinstance(result, Exception):
+                    logging.warning(f"任務 {i} 取消時出現例外：{result}")
+
+        await bot.close()
+        logging.info("Bot 已關閉。")
+        
+    except Exception as e:
+        logging.error(f"Shutdown command failed: {e}")
+        await interaction.followup.send(
+            f"哎呀，幽幽子好像被什麼纏住了，無法沉眠…錯誤：{e}",
+            ephemeral=True
+        )
 
 @bot.slash_command(name="restart", description="喚醒幽幽子重新起舞")
 async def restart(interaction: discord.Interaction):
-    YUYUKO_QUOTES = [
-        "人世無常，魂魄永存～",
-        "櫻花散落之時，便是幽幽子用餐之刻哦～",
-        "冥界的風，總是這麼舒服呢～",
-    ]
-    if interaction.user.id == AUTHOR_ID:
-        try:
-            embed = discord.Embed(
-                title="幽幽子即將甦醒",
-                description="幽幽子要重新翩翩起舞啦，稍等片刻哦～",
-                color=discord.Color.orange()
-            )
-            embed.set_footer(text=random.choice(YUYUKO_QUOTES))
-            
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            await send_global_webhook_message("🔄 **幽幽子輕輕轉身，即將再度現身...**", discord.Color.orange())
-            await asyncio.sleep(3)
-            os.execv(sys.executable, [sys.executable] + sys.argv)
-        except Exception as e:
-            logging.error(f"Restart command failed: {e}")
-            await interaction.followup.send(f"哎呀，幽幽子好像絆倒了…重啟失敗，錯誤：{e}", ephemeral=True)
-    else:
-        await interaction.response.send_message("只有靈魂的主人才能喚醒幽幽子，你還不行呢～", ephemeral=True)
+    """
+    重啟 Discord 機器人，僅限授權用戶執行。
+
+    Args:
+        interaction (discord.Interaction): Slash 指令的交互對象。
+    """
+    if interaction.user.id != AUTHOR_ID:
+        await interaction.response.send_message(
+            "只有靈魂的主人才能喚醒幽幽子，你還不行呢～",
+            ephemeral=True
+        )
+        return
+
+    try:
+        icon_url = bot.user.avatar.url if bot.user.avatar else bot.user.default_avatar.url
+        embed = discord.Embed(
+            title="幽幽子即將甦醒",
+            description="幽幽子要重新翩翩起舞啦，稍等片刻哦～",
+            color=discord.Color.orange(),
+            timestamp=datetime.now(timezone.utc)
+        )
+        embed.set_footer(text="來自冥界的微風與魂魄之語～", icon_url=icon_url)
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        await send_webhook_message(bot, "🔄 **幽幽子輕輕轉身，即將再度現身...**", discord.Color.orange())
+        await asyncio.sleep(3)
+        logging.info("Bot restart initiated by authorized user.")
+
+        global session
+        if session and not session.closed:
+            await session.close()
+            logging.info("已關閉 aiohttp.ClientSession。")
+
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    except (discord.errors.HTTPException, OSError) as e:
+        logging.error(f"Restart command failed: {e}")
+        await interaction.followup.send(
+            f"哎呀，幽幽子好像絆倒了…重啟失敗，錯誤：{e}",
+            ephemeral=True
+        )
         
 @bot.slash_command(name="ban", description="封禁用户")
 async def ban(interaction: discord.Interaction, member: discord.Member, reason: str = None):
@@ -3277,12 +3438,12 @@ async def userinfo(ctx: discord.ApplicationContext, user: discord.Member = None)
     guild_id = str(ctx.guild.id) if ctx.guild else "DM"
     user_id = str(user.id)
 
-    guild_config = user_data.get(guild_id, {})
-    user_config = guild_config.get(user_id, {})
-
-    work_cooldown = user_config.get('work_cooldown', '未工作')
-    job = user_config.get('job', '無職業')
-    mp = user_config.get('MP', 0)
+    if not user.bot:
+        guild_config = user_data.get(guild_id, {})
+        user_config = guild_config.get(user_id, {})
+        work_cooldown = user_config.get('work_cooldown', '未工作')
+        job = user_config.get('job', '無職業')
+        mp = user_config.get('MP', 0)
 
     embed = discord.Embed(
         title="🌸 幽幽子窺探的靈魂資訊 🌸",
@@ -3314,19 +3475,22 @@ async def userinfo(ctx: discord.ApplicationContext, user: discord.Member = None)
     else:
         embed.add_field(name="伺服器化名", value="此魂不在當前之地", inline=True)
 
-    work_embed = discord.Embed(
-        title="💼 幽幽子觀察到的命運軌跡",
-        color=discord.Color.from_rgb(135, 206, 250)
-    )
-    work_embed.add_field(
-        name="命運狀態",
-        value=(
-            f"💼 職業: {job}\n"
-            f"⏳ 冷卻之時: {work_cooldown}\n"
-            f"📊 靈魂壓力 (MP): {mp}/200"
-        ),
-        inline=False
-    )
+    embeds = [embed]
+    if not user.bot:
+        work_embed = discord.Embed(
+            title="💼 幽幽子觀察到的命運軌跡",
+            color=discord.Color.from_rgb(135, 206, 250)
+        )
+        work_embed.add_field(
+            name="命運狀態",
+            value=(
+                f"💼 職業: {job}\n"
+                f"⏳ 冷卻之時: {work_cooldown}\n"
+                f"📊 靈魂壓力 (MP): {mp}/200"
+            ),
+            inline=False
+        )
+        embeds.append(work_embed)
 
     yuyuko_quotes = [
         "靈魂的軌跡真是美麗啊…有沒有好吃的供品呢？",
@@ -3355,7 +3519,7 @@ async def userinfo(ctx: discord.ApplicationContext, user: discord.Member = None)
     button.callback = button_callback
     view.add_item(button)
 
-    await ctx.respond(embeds=[embed, work_embed], view=view)
+    await ctx.respond(embeds=embeds, view=view)
 
 @bot.slash_command(name="feedback", description="幽幽子聆聽你的靈魂之聲～提交反饋吧！")
 async def feedback(ctx: discord.ApplicationContext, description: str = None):
@@ -3363,7 +3527,7 @@ async def feedback(ctx: discord.ApplicationContext, description: str = None):
     view = View(timeout=None)
 
     async def handle_feedback(interaction: discord.Interaction, category: str):
-        feedback_channel_id = 1308316531444158525
+        feedback_channel_id = 1372560258228162560
         feedback_channel = bot.get_channel(feedback_channel_id)
 
         if feedback_channel is None:
@@ -3684,7 +3848,6 @@ def calculate_fish_price(fish):
         return 0
 
 @bot.slash_command(name="fish_shop", description="釣魚商店")
-@track_balance_json
 async def fish_shop(ctx: discord.ApplicationContext):
     user_id = str(ctx.user.id)
     guild_id = str(ctx.guild.id)
@@ -3974,7 +4137,7 @@ async def draw_lots_command(interaction: discord.Interaction):
         title="📢 御神籤功能停用公告 📢",
         description=(
             f"很抱歉，**{user_name}**，\n"
-            "在今日，我們 Discord Bot 幽幽子的作者，也就是 Miya253，停用在幽幽子上的御神籤功能。\n\n"
+            "在<t:1742744940>，我們 Discord Bot 幽幽子的作者，也就是 Miya253，停用在幽幽子上的御神籤功能。\n\n"
             "如果您有抽籤需求，請使用以下鏈接邀請 **博麗靈夢**：\n"
             "[點擊此訊息邀請 博麗靈夢](https://discord.com/oauth2/authorize?client_id=1352316233772437630&permissions=8&integration_type=0&scope=bot)\n\n"
             "以上，很抱歉未能為用戶們提供最好的抽籤體驗。"
@@ -4040,7 +4203,7 @@ async def quiz(ctx: ApplicationContext):
                 return await interaction.response.send_message("⏳ 這題已經解開啦，幽靈不會重複問哦！", ephemeral=True)
 
             self.view.answered = True
-            self.view.stop()  # 停止超時計時器
+            self.view.stop()
 
             for child in self.view.children:
                 child.disabled = True
@@ -4064,7 +4227,7 @@ async def quiz(ctx: ApplicationContext):
 async def rpg_start(ctx: discord.ApplicationContext):
     embed = discord.Embed(
         title="RPG系統通知",
-        description="正在開發中，預計完成時間：未知。\n如果你想要提前收到測試通知\n請點擊這個文字加入我們[測試群組](https://discord.gg/4GE3FpR8rH)",
+        description="正在開發中，預計完成時間：未知。\n如果你想要提前收到測試通知\n請點擊這個文字加入我們[官方群組](https://discord.gg/2eRTxPAx3z)  ",
         color=discord.Color.red()
     )
     embed.set_footer(text="很抱歉無法使用該指令")
@@ -4118,8 +4281,8 @@ async def help(ctx: discord.ApplicationContext):
             "> `ban` - 封鎖用戶，讓他們離開白玉樓吧！\n"
             "> `kick` - 踢出用戶，給他們一點小教訓～\n"
             "> `start_giveaway` - 開啟抽獎，靈魂們都期待著呢！\n"
-            "> `mute` - 禁言某位成員，讓他們安靜一會兒～\n"
-            "> `unmute` - 解除禁言，讓靈魂的聲音再次響起吧～"
+            "> `timeout` - 禁言某位成員，讓他們安靜一會兒～\n"
+            "> `untimeout` - 解除禁言，讓靈魂的聲音再次響起吧～"
         ),
         color=discord.Color.from_rgb(255, 182, 193)
     )
